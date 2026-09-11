@@ -71,7 +71,7 @@ to navigate back out to the main menu and save before closing.
 | Now playing | Last.fm API key and username, future support planned for Music Assistant |
 | Home Assistant alerts | Door sensor + "opened by" entity, broadcast text entity and duration, thermostat |
 | Content → Full screen | Grid size/gap/padding; for each widget: show, column, row, width, height |
-| Content → Small screen | Hide sections with errors; for each section: show, position in the rotation, seconds on screen (Weather and HA alerts: 0 = automatic). Scripture is off by default |
+| Content → Small screen | Hide sections with errors; for each section: show, position in the rotation, seconds on screen (Weather and HA alerts: 0 = automatic) |
 | View Assist & sidebar panel | Configure how Rundown interacts with View Assist, including sidebar panel title/icon, full-screen Rundown view (`rundowntweaks`), Rundown clock view (`rundowntweaksclock`), clock background (device background or animated sky), thermostat on clock, sidebar menu (off / clock view / all views) and side |
 
 **Layout editing on the page:** as a Home Assistant admin, tap the RUNDOWN
