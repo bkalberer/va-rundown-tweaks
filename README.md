@@ -3,17 +3,31 @@
 A Home Assistant integration that packages **Rundown** — a glanceable wall
 dashboard (clock, weather, agenda, metro, tasks, scripture, now playing, news
 ticker, door/broadcast alerts) — together with a matching look for
-[View Assist](https://github.com/dinki/view_assist_integration) devices:
+[View Assist](https://github.com/dinki/view_assist_integration) displays. Other
+tweaks are included and available.
 
-| Piece | What it is |
+## Disclaimers
+
+- The majority of this code has been LLM authored or LLM augmented, chiefly with Claude Sonnet 4.6 and Opus 5.
+- The current state of this project should be considered ALPHA - please take caution if/when using this integration on a production Home Assistant instance.
+- Pull requests and issues are welcome!
+- A lot of this integration's components were tailored to and built for products/services/configurations that I use in my setup. I'm working to make this more and more modular to support more customization.
+
+## Acknowledgements
+
+- The concept and architecture for Rundown was inspired by [MagicMirror²](https://github.com/magicmirrororg/magicmirror)
+- The side bar tweak is largely a fork of [View Assist Side Menu](https://docs.ostat.com/docs/projects/view_assist/) from Chris/ostat, which was also inspired by [The Stock Pot](https://www.youtube.com/watch?v=6p5wvVl957c)
+- The [View Assist](https://github.com/dinki/view_assist_integration) and [VACA](https://github.com/msp1974/ViewAssist_Companion_App) projects are vital to these kinds of setups
+
+| Component | Function |
 | --- | --- |
-| **Rundown dashboard** | The full Rundown page, as a sidebar panel (`/va-rundown-tweaks`), a Lovelace card (`custom:va-rundown-tweaks-card`), and optionally a full-screen View Assist view (`rundown`). Desktop grid layout on large screens, a rotating single-module layout on short screens such as 960×480 tablets. |
-| **Rundown clock view** | A View Assist view (`rundowntweaksclock`) restyled to match Rundown: IBM Plex type, animated weather icon, thermostat readout, and night-mode dimming. |
-| **Sidebar menu** | `custom:view-assist-menu-card`: a floating bar built from each View Assist device's `menu_items` (views, entity toggles, `service:` and `press:` items). Can be added to the Rundown clock view only, or to every View Assist view. |
+| **Rundown dashboard** | The full Rundown page, as a sidebar panel (`/va-rundown-tweaks`), a Lovelace card (`custom:va-rundown-tweaks-card`), and optionally a full-screen View Assist view (`rundown`). Desktop grid layout on large screens, a rotating single-module layout on short screens such as 960×480 tablets. This is determined automatically based on screen size. |
+| **Rundown clock view** | A View Assist view (`rundowntweaksclock`) restyled to match the rest of Rundown: IBM Plex type, animated weather icon, thermostat readout, and night-mode dimming. |
+| **Sidebar menu** | `custom:view-assist-menu-card`: a floating bar built from each View Assist device's `menu_items` (views, entity toggles, `service:` and `press:` items). Can be added to the Rundown clock view only, or to every View Assist view. Fork of [View Assist Side Menu](https://docs.ostat.com/docs/projects/view_assist/) from Chris/ostat, which was also inspired by [The Stock Pot](https://www.youtube.com/watch?v=6p5wvVl957c) |
 | **Weather sky background** | An animated WebGL sky (sun/moon position, moon phase, clouds, rain, snow, fog, lightning) driven by any Home Assistant weather entity. Use it as the clock view background, or as any View Assist device background. |
 
 Everything is configured in **Settings → Devices & services → View Assist
-Rundown → Configure**. Nothing is read from files under `www/`.
+Rundown → Configure**.
 
 ## Requirements
 
@@ -36,35 +50,40 @@ Rundown**. You can:
 
 - **Start fresh.** Pick a weather entity, units and clock format; everything
   else is under *Configure*.
-- **Import an existing `rundown-config.json`.** Brings over API keys, entities,
-  layout, weather rotation and the photo list from a standalone `rundown.html`.
+- **Import an existing `rundown-config.json`.** This is mostly used for testing.
 
 ## Configuration
 
 *Configure* opens a menu. Edit any section, then choose **Save**. Open Rundown
-screens reload with the new settings within a minute.
+screens reload with the new settings within a minute. When in sub-menus, make sure
+to navigate back out to the main menu and save before closing.
 
 | Section | Options |
 | --- | --- |
 | Display | Text size, text shadow, 24-hour clock, US/metric units, compact-layout height, IBM Plex fonts |
 | Background photos | Folder inside your config directory, optional explicit list (file names or URLs), shuffle, seconds per photo |
 | Weather | Source (Home Assistant weather entity *or* Pirate Weather API), location, forecast rotation slides and timings, broadcast-style layout and city name |
-| News ticker | WTOP, Straight Arrow News or a custom RSS feed; speed, height; optional public CORS-proxy fallback |
+| News ticker | WTOP (Washington DC), Straight Arrow News or a custom RSS feed; speed, height; optional public CORS-proxy fallback |
 | Calendar | ICS/webcal URL, or a Microsoft Graph `calendarView` URL + token |
 | Tasks | Any Home Assistant to-do lists (defaults to all Todoist lists), or Microsoft To Do; date window; undated tasks |
-| Metro (WMATA) | API key and station codes |
+| Metro (WMATA) | API key and station codes for Washington DC's metro transit system. Support for other systems coming soon |
 | Scripture | ESV API key (without one, a built-in verse rotation is shown) |
-| Now playing | Last.fm API key and username |
+| Now playing | Last.fm API key and username, future support planned for Music Assistant |
 | Home Assistant alerts | Door sensor + "opened by" entity, broadcast text entity and duration, thermostat |
 | Content → Full screen | Grid size/gap/padding; for each widget: show, column, row, width, height |
 | Content → Small screen | Hide sections with errors; for each section: show, position in the rotation, seconds on screen (Weather and HA alerts: 0 = automatic). Scripture is off by default |
-| View Assist & sidebar panel | Sidebar panel title/icon, full-screen Rundown view (`rundowntweaks`), Rundown clock view (`rundowntweaksclock`), clock background (device background or animated sky), thermostat on clock, sidebar menu (off / clock view / all views) and side |
+| View Assist & sidebar panel | Configure how Rundown interacts with View Assist, including sidebar panel title/icon, full-screen Rundown view (`rundowntweaks`), Rundown clock view (`rundowntweaksclock`), clock background (device background or animated sky), thermostat on clock, sidebar menu (off / clock view / all views) and side |
 
 **Layout editing on the page:** as a Home Assistant admin, tap the RUNDOWN
 logo five times to open the layout editor. You can drag and resize panels,
 add and remove widgets, and reorder the weather slides (⚙ on the weather
 panel). Changes save to the integration automatically. *Settings* in that
 toolbar jumps to the options above.
+
+### Quick start
+
+After the initial configuration, set `/view-assist/rundowntweaks` or 
+`/view-assist/rundowntweaksclock` to a device's home view in View Assist.
 
 ### Weather sky as a View Assist background
 
@@ -79,7 +98,7 @@ the device's own weather entity; `?weather=weather.other` overrides it.
 adds a `rundowntweaks` view that fills the whole screen, above the Home Assistant
 header and sidebar, whatever the device's View Assist screen mode. You can
 open it with `view_assist.navigate` (path `/view-assist/rundowntweaks`), add
-`view:rundowntweaks` to a device's menu items, or make it the device's home screen.
+`view:rundowntweaks` to a device's menu items, or **make it the device's home screen**.
 Like any other non-home View Assist view, it returns to the home screen after
 the device's view timeout unless the device is in hold mode.
 
@@ -100,7 +119,7 @@ and `va_rundown_tweaks.remove_view_assist_assets`.
 
 ### Disabling and removing
 
-**Disabling** the integration suspends all of it:
+**Disabling** the integration suspends all of Rundown and all tweaks
 - The sidebar panel and its actions are removed.
 - Its dashboard resources, View Assist views and sidebar template are
   withdrawn.
@@ -139,32 +158,6 @@ rather than a stored long-lived token.
   if you enable the fallback.
 - Keys for services the browser calls directly (Pirate Weather, WMATA, ESV,
   Last.fm, Microsoft Graph) are sent to signed-in Home Assistant users.
-
-## Migrating from a standalone `rundown.html`
-
-1. Install this integration and use **Import an existing rundown-config.json**.
-   Move your photo folder out of `www/` (for example to `config/rundown_photos`)
-   and set it under *Background photos*.
-2. Under *Settings → Dashboards → Resources*, remove the old
-   `/local/rundown-wx-icon.js` and `/local/view-assist-menu-card.js`
-   resources. The integration registers its own copies.
-3. Replace iframe cards that point at `/local/rundown/rundown.html` with
-   `custom:va-rundown-tweaks-card`, or use the `/va-rundown-tweaks` panel.
-4. Point View Assist backgrounds that use an old weather-window page at
-   `/va_rundown_tweaks/static/sky.html`.
-5. **Delete the old files from `www/`** (`rundown-config.json`, the
-   weather-window pages). Files under `www/` are downloadable **without
-   signing in**. Also **revoke and replace** any tokens and API keys they
-   contained.
-
-## Icon and logo
-
-`custom_components/va_rundown_tweaks/brand/` holds the integration's icon and
-logo: the Rundown wordmark from the full-screen page, with light and dark
-theme versions, each at 1× and 2×. Home Assistant 2026.3 and newer show these
-on the Integrations page and elsewhere in the UI; no brands-repository
-submission is needed. The HACS dashboard may still show a placeholder icon
-([hacs/integration#5171](https://github.com/hacs/integration/issues/5171)).
 
 ## Development
 
