@@ -1,0 +1,551 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "View Assist Rundown Tweaks is already set up. Use Configure to change it."
+    },
+    "error": {
+      "weather_entity_required": "Choose a weather entity, or switch the source to Pirate Weather.",
+      "weather_key_required": "Enter a Pirate Weather API key, or switch the source to a weather entity.",
+      "file_not_found": "No file at that path.",
+      "invalid_json": "That file is not a valid Rundown config (JSON object expected).",
+      "outside_config": "The file must be inside your Home Assistant config folder."
+    },
+    "step": {
+      "user": {
+        "title": "View Assist Rundown Tweaks",
+        "description": "Start with a blank Rundown, or bring over the settings from a standalone rundown.html setup.",
+        "menu_options": {
+          "fresh": "Start fresh",
+          "import_legacy": "Import an existing rundown-config.json"
+        }
+      },
+      "fresh": {
+        "title": "Weather and clock",
+        "description": "Everything else (background photos, calendar, tasks, transit, layout, View Assist views) is set under Configure after setup.",
+        "data": {
+          "weather_source": "Weather source",
+          "weather_entity": "Weather entity",
+          "weather_key": "Pirate Weather API key",
+          "units": "Units",
+          "use_24h": "24-hour clock"
+        },
+        "data_description": {
+          "weather_entity": "Any Home Assistant weather entity. No API key needed.",
+          "weather_key": "Free key from pirateweather.net. Only used when the source is Pirate Weather."
+        }
+      },
+      "import_legacy": {
+        "title": "Import rundown-config.json",
+        "description": "Path relative to your config folder. API keys, entities, layout and weather rotation are imported. The Home Assistant long-lived token is deliberately not imported: the integration signs in as whoever is viewing the page. After importing, delete the old file from www/ — anything under www/ can be downloaded without signing in.",
+        "data": {
+          "path": "Config file path"
+        }
+      }
+    }
+  },
+  "options": {
+    "error": {
+      "weather_entity_required": "Choose a weather entity, or switch the source to Pirate Weather.",
+      "weather_key_required": "Enter a Pirate Weather API key, or switch the source to a weather entity.",
+      "folder_not_found": "Folder not found inside your config folder.",
+      "invalid_url": "Enter a full http(s):// or webcal:// URL.",
+      "custom_feed_required": "Enter the RSS feed URL for the custom source.",
+      "ms_client_id_required": "Microsoft To Do needs an Azure app Client ID.",
+      "view_assist_missing": "View Assist is not installed, so its views and sidebar cannot be added.",
+      "widget_outside_grid": "{widget} runs past the edge of the grid. Reduce its width or height, move it, or add grid columns or rows.",
+      "no_slides": "Turn on at least one small screen section."
+    },
+    "step": {
+      "init": {
+        "title": "Rundown settings",
+        "description": "Edit any section, then choose **Save** to apply. Open Rundown screens pick up changes within a minute.",
+        "menu_options": {
+          "display": "Display",
+          "background": "Background photos",
+          "weather": "Weather",
+          "ticker": "News ticker",
+          "calendar": "Calendar",
+          "tasks": "Tasks",
+          "transit": "Metro (WMATA)",
+          "scripture": "Scripture",
+          "now_playing": "Now playing",
+          "alerts": "Home Assistant alerts",
+          "content": "Content",
+          "view_assist": "View Assist & sidebar panel",
+          "save": "Save"
+        }
+      },
+      "display": {
+        "title": "Display",
+        "data": {
+          "text_scale": "Text size",
+          "text_shadow": "Text shadow",
+          "use_24h": "24-hour clock",
+          "units": "Units",
+          "mobile_breakpoint": "Small screen layout at or below this height",
+          "load_fonts": "Load IBM Plex fonts from Google Fonts"
+        },
+        "data_description": {
+          "text_shadow": "Dark halo behind text so it stays readable over bright photos.",
+          "mobile_breakpoint": "Screens this short or shorter (e.g. 960×480 View Assist tablets) get the rotating small screen layout. Choose its sections under Content.",
+          "load_fonts": "Also adds the font stylesheet as a dashboard resource for the View Assist clock view."
+        }
+      },
+      "background": {
+        "title": "Background photos",
+        "data": {
+          "bg_folder": "Photo folder",
+          "bg_images": "Specific images (optional)",
+          "bg_shuffle": "Shuffle",
+          "bg_interval": "Seconds per photo"
+        },
+        "data_description": {
+          "bg_folder": "Folder inside your config directory, e.g. rundown_photos. Photos are only served to signed-in users.",
+          "bg_images": "One per line: file names from the folder (in this order) or full image URLs. Leave empty to use every image in the folder."
+        }
+      },
+      "weather": {
+        "title": "Weather",
+        "data": {
+          "weather_source": "Weather source",
+          "weather_entity": "Weather entity",
+          "weather_key": "Pirate Weather API key",
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "wx_rotation_enabled": "Rotate extended forecast",
+          "wx_slides_enabled": "Forecast slides",
+          "wx_broadcast_style": "Broadcast-style weather (small screen)",
+          "wx_city_name": "Broadcast city name"
+        },
+        "data_description": {
+          "latitude": "Pirate Weather only. Leave empty to use your Home Assistant location.",
+          "longitude": "Pirate Weather only. Leave empty to use your Home Assistant location.",
+          "wx_slides_enabled": "Slide order can be dragged in the page's layout editor (weather ⚙).",
+          "wx_city_name": "Shown in the broadcast-style header. Leave empty to hide."
+        },
+        "sections": {
+          "slide_times": {
+            "name": "Seconds per forecast slide",
+            "data": {
+              "h1": "Next 12 hours",
+              "h2": "Tomorrow morning",
+              "h3": "Tomorrow night",
+              "daily": "5-day forecast",
+              "almanac": "Almanac",
+              "moon": "Moon phase",
+              "sun": "Sunrise / sunset"
+            }
+          }
+        }
+      },
+      "ticker": {
+        "title": "News ticker",
+        "data": {
+          "ticker_source": "Primary feed",
+          "ticker_custom_url": "Custom RSS feed URL",
+          "ticker_custom_label": "Custom feed label",
+          "ticker_speed": "Scroll speed",
+          "ticker_height": "Ticker height",
+          "cors_proxy_fallback": "Fall back to public CORS proxies"
+        },
+        "data_description": {
+          "ticker_source": "The other built-in feed is used automatically if the primary one fails.",
+          "ticker_height": "Leave empty for automatic.",
+          "cors_proxy_fallback": "Feeds and your calendar are normally fetched by Home Assistant itself. Only turn this on if that fails; it sends the calendar link (including its private token) through third-party proxy services."
+        }
+      },
+      "calendar": {
+        "title": "Calendar",
+        "data": {
+          "ics_url": "ICS / webcal URL",
+          "graph_url": "Microsoft Graph calendarView URL",
+          "graph_token": "Microsoft Graph bearer token"
+        },
+        "data_description": {
+          "ics_url": "Fetched by Home Assistant, so it never reaches the browser unless proxy fallback is on.",
+          "graph_url": "Alternative to ICS. Used only when no ICS URL is set."
+        }
+      },
+      "tasks": {
+        "title": "Tasks",
+        "data": {
+          "todo_source": "Task source",
+          "todo_entities": "To-do lists",
+          "todo_filter": "Only lists whose name contains",
+          "todo_overdue_days": "Hide tasks overdue by more than",
+          "todo_future_days": "Hide tasks due further out than",
+          "todo_show_undated": "Show tasks with no due date"
+        },
+        "data_description": {
+          "todo_entities": "Any Home Assistant to-do lists. Leave empty to use every Todoist list."
+        },
+        "sections": {
+          "microsoft": {
+            "name": "Microsoft To Do",
+            "data": {
+              "ms_client_id": "Azure app Client ID",
+              "ms_client_secret": "Client secret",
+              "ms_refresh_token": "Refresh token",
+              "ms_list_name": "List name"
+            },
+            "data_description": {
+              "ms_client_id": "Register a Single-page application with redirect URI https://<your-ha>/va_rundown_tweaks/static/rundown.html, then use Link Microsoft in the page's layout editor.",
+              "ms_refresh_token": "Filled in automatically by Link Microsoft, and kept up to date as Microsoft rotates it."
+            }
+          }
+        }
+      },
+      "transit": {
+        "title": "Metro (WMATA)",
+        "data": {
+          "wmata_key": "WMATA API key",
+          "wmata_stations": "Station codes"
+        },
+        "data_description": {
+          "wmata_key": "Free key from developer.wmata.com.",
+          "wmata_stations": "Comma separated, e.g. N06,N04."
+        }
+      },
+      "scripture": {
+        "title": "Scripture",
+        "description": "Verse of the day in the Scripture widget.",
+        "data": {
+          "esv_key": "ESV API key"
+        },
+        "data_description": {
+          "esv_key": "From api.esv.org. Without a key a built-in verse rotation is shown."
+        }
+      },
+      "now_playing": {
+        "title": "Now playing",
+        "description": "The Now Playing widget appears only while Last.fm reports a track playing.",
+        "data": {
+          "lastfm_key": "Last.fm API key",
+          "lastfm_user": "Last.fm username"
+        },
+        "data_description": {
+          "lastfm_key": "From last.fm/api/account/create."
+        }
+      },
+      "alerts": {
+        "title": "Home Assistant alerts",
+        "data": {
+          "door_entity": "Door sensor",
+          "door_operator_entity": "Who-opened-it entity",
+          "broadcast_entity": "Broadcast text entity",
+          "broadcast_seconds": "Show each broadcast for",
+          "thermostat_entity": "Thermostat"
+        },
+        "data_description": {
+          "door_entity": "Shows a warning while this is on/open.",
+          "broadcast_entity": "A text helper an automation fills from an Assist broadcast; each new value is shown once.",
+          "thermostat_entity": "Current temperature shown under the weather gauge and on the View Assist clock view."
+        }
+      },
+      "view_assist": {
+        "title": "View Assist & sidebar panel",
+        "description": "View Assist changes are applied to the View Assist dashboard when you save. The views are written to config/view_assist/views/ — copy a view's file to user_<name>.yaml there to customise it.",
+        "data": {
+          "register_panel": "Add Rundown to the sidebar",
+          "panel_title": "Sidebar title",
+          "panel_icon": "Sidebar icon",
+          "install_clock_view": "Install the Rundown clock view (rundowntweaksclock)",
+          "clock_background": "Clock view background",
+          "clock_thermostat": "Show the thermostat on the clock view",
+          "install_app_view": "Add full-screen Rundown as a View Assist view",
+          "sidebar_mode": "View Assist sidebar menu",
+          "sidebar_position": "Sidebar side"
+        },
+        "data_description": {
+          "register_panel": "Open /va-rundown-tweaks?kiosk for a full-screen display.",
+          "install_app_view": "Adds a \"rundowntweaks\" view to the View Assist dashboard that fills the whole screen. Open it with view_assist.navigate (path /view-assist/rundowntweaks), add view:rundowntweaks to a device's menu items, or make it a device's home screen.",
+          "install_clock_view": "To make it a device's home screen, set its home view to /view-assist/rundowntweaksclock in View Assist.",
+          "sidebar_mode": "Shows the View Assist device's menu items as a floating bar. \"All views\" is skipped if your dashboard already adds a view-assist-menu-card."
+        }
+      },
+      "content": {
+        "title": "Content",
+        "description": "Choose what Rundown shows. **Full screen** is the grid layout used on larger displays; **Small screen** is the rotating one-section-at-a-time layout used at or below the height set under Display.",
+        "menu_options": {
+          "content_full_screen": "Full screen",
+          "content_small_screen": "Small screen",
+          "init": "Back to settings"
+        }
+      },
+      "content_full_screen": {
+        "title": "Full screen content",
+        "description": "Turn widgets on or off and place them on the grid. Column and row count from 1 at the top-left; width and height are in grid cells. You can also drag and resize widgets on the page itself: tap the RUNDOWN logo 5 times as an admin. Changes made there are saved here. Hiding the Logo also hides that way into the layout editor.",
+        "data": {
+          "grid_cols": "Grid columns",
+          "grid_rows": "Grid rows",
+          "grid_gap": "Grid gap (CSS)",
+          "grid_pad": "Grid padding (CSS)"
+        },
+        "sections": {
+          "widget_logo": {
+            "name": "Logo",
+            "data": {
+              "show": "Show",
+              "column": "Column",
+              "row": "Row",
+              "width": "Width",
+              "height": "Height"
+            }
+          },
+          "widget_clock": {
+            "name": "Clock",
+            "data": {
+              "show": "Show",
+              "column": "Column",
+              "row": "Row",
+              "width": "Width",
+              "height": "Height"
+            }
+          },
+          "widget_agenda": {
+            "name": "Agenda",
+            "data": {
+              "show": "Show",
+              "column": "Column",
+              "row": "Row",
+              "width": "Width",
+              "height": "Height"
+            }
+          },
+          "widget_metro": {
+            "name": "Metro",
+            "data": {
+              "show": "Show",
+              "column": "Column",
+              "row": "Row",
+              "width": "Width",
+              "height": "Height"
+            }
+          },
+          "widget_weather": {
+            "name": "Weather",
+            "data": {
+              "show": "Show",
+              "column": "Column",
+              "row": "Row",
+              "width": "Width",
+              "height": "Height"
+            }
+          },
+          "widget_scripture": {
+            "name": "Scripture",
+            "data": {
+              "show": "Show",
+              "column": "Column",
+              "row": "Row",
+              "width": "Width",
+              "height": "Height"
+            }
+          },
+          "widget_todo": {
+            "name": "To Do",
+            "data": {
+              "show": "Show",
+              "column": "Column",
+              "row": "Row",
+              "width": "Width",
+              "height": "Height"
+            }
+          },
+          "widget_nowplaying": {
+            "name": "Now playing",
+            "data": {
+              "show": "Show",
+              "column": "Column",
+              "row": "Row",
+              "width": "Width",
+              "height": "Height"
+            },
+            "description": "Only appears while Last.fm reports a track playing."
+          },
+          "widget_haalerts": {
+            "name": "HA alerts",
+            "data": {
+              "show": "Show",
+              "column": "Column",
+              "row": "Row",
+              "width": "Width",
+              "height": "Height"
+            },
+            "description": "Only appears while an alert is active. Shares its place with Now playing by default; an active alert takes priority."
+          }
+        }
+      },
+      "content_small_screen": {
+        "title": "Small screen content",
+        "description": "Choose which sections rotate, their order (position 1 goes first) and how long each stays up. The progress dots show only the sections currently in the rotation.",
+        "data": {
+          "mobile_hide_errors": "Hide sections with errors"
+        },
+        "data_description": {
+          "mobile_hide_errors": "Skip Weather, Agenda, Metro or To Do while their data fails to load or they are not configured. They rejoin the rotation once they load again."
+        },
+        "sections": {
+          "slide_clock": {
+            "name": "Clock",
+            "data": {
+              "show": "Show",
+              "position": "Position",
+              "duration": "Seconds on screen"
+            }
+          },
+          "slide_agenda": {
+            "name": "Agenda",
+            "data": {
+              "show": "Show",
+              "position": "Position",
+              "duration": "Seconds on screen"
+            }
+          },
+          "slide_metro": {
+            "name": "Metro",
+            "data": {
+              "show": "Show",
+              "position": "Position",
+              "duration": "Seconds on screen"
+            },
+            "data_description": {
+              "show": "Takes a turn only when a WMATA key and stations are set."
+            }
+          },
+          "slide_weather": {
+            "name": "Weather",
+            "data": {
+              "show": "Show",
+              "position": "Position",
+              "duration": "Seconds on screen"
+            },
+            "data_description": {
+              "duration": "0 = automatic: long enough for every forecast product. Any other value shortens or stretches each product to fit."
+            }
+          },
+          "slide_scripture": {
+            "name": "Scripture",
+            "data": {
+              "show": "Show",
+              "position": "Position",
+              "duration": "Seconds on screen"
+            }
+          },
+          "slide_todo": {
+            "name": "To Do",
+            "data": {
+              "show": "Show",
+              "position": "Position",
+              "duration": "Seconds on screen"
+            }
+          },
+          "slide_nowplaying": {
+            "name": "Now playing",
+            "data": {
+              "show": "Show",
+              "position": "Position",
+              "duration": "Seconds on screen"
+            },
+            "data_description": {
+              "show": "Takes a turn only while Last.fm reports a track playing."
+            }
+          },
+          "slide_haalerts": {
+            "name": "HA alerts",
+            "data": {
+              "show": "Show",
+              "position": "Position",
+              "duration": "Seconds on screen"
+            },
+            "data_description": {
+              "show": "Takes a turn only while a door or broadcast alert is active, and jumps in as soon as one starts.",
+              "duration": "0 = stay on screen until the alert clears."
+            }
+          }
+        }
+      }
+    }
+  },
+  "selector": {
+    "weather_source": {
+      "options": {
+        "entity": "Home Assistant weather entity",
+        "pirateweather": "Pirate Weather API"
+      }
+    },
+    "units": {
+      "options": {
+        "us": "US (°F, mph)",
+        "si": "Metric (°C, km/h)"
+      }
+    },
+    "text_scale": {
+      "options": {
+        "1": "Normal",
+        "1.15": "Large",
+        "1.3": "Extra large"
+      }
+    },
+    "wx_slide": {
+      "options": {
+        "h1": "Next 12 hours",
+        "h2": "Tomorrow morning",
+        "h3": "Tomorrow night",
+        "daily": "5-day forecast",
+        "almanac": "Almanac",
+        "moon": "Moon phase",
+        "sun": "Sunrise / sunset"
+      }
+    },
+    "ticker_source": {
+      "options": {
+        "wtop": "WTOP",
+        "san": "Straight Arrow News",
+        "custom": "Custom RSS feed"
+      }
+    },
+    "todo_source": {
+      "options": {
+        "none": "None",
+        "home_assistant": "Home Assistant to-do lists",
+        "microsoft": "Microsoft To Do"
+      }
+    },
+    "clock_background": {
+      "options": {
+        "view_assist": "View Assist device background",
+        "sky": "Animated weather sky"
+      }
+    },
+    "sidebar_mode": {
+      "options": {
+        "off": "Off",
+        "clock_view": "Rundown clock view only",
+        "all_views": "All View Assist views"
+      }
+    },
+    "sidebar_position": {
+      "options": {
+        "right": "Right",
+        "left": "Left"
+      }
+    }
+  },
+  "services": {
+    "install_view_assist_assets": {
+      "name": "Install View Assist assets",
+      "description": "Re-apply the Rundown views and sidebar to the View Assist dashboard according to the integration options.",
+      "fields": {
+        "force": {
+          "name": "Force",
+          "description": "Reinstall views even if they look up to date."
+        }
+      }
+    },
+    "remove_view_assist_assets": {
+      "name": "Remove View Assist assets",
+      "description": "Remove the Rundown views and sidebar from the View Assist dashboard (options are left unchanged)."
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "domain": "va_rundown_tweaks",
+  "name": "View Assist Rundown Tweaks",
+  "after_dependencies": ["view_assist"],
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "lovelace", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/your-github-user/va_rundown_tweaks",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/your-github-user/va_rundown_tweaks/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.2.0"
+}

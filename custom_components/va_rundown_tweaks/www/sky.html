@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rundown Sky</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; width:100vw; height:100vh; }
+canvas#glcanvas { position:fixed; inset:0; width:100vw; height:100vh; display:block; }
+
+/* ── DEBUG PANEL ─────────────────────────────────────────── */
+#debug {
+  position:fixed; top:16px; right:16px; z-index:200;
+  font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",monospace;
+  font-size:11px; line-height:1.65;
+  background:rgba(0,0,0,.52);
+  border:1px solid rgba(255,255,255,.15);
+  backdrop-filter:blur(20px) saturate(1.4);
+  -webkit-backdrop-filter:blur(20px) saturate(1.4);
+  border-radius:14px; padding:12px 16px;
+  color:rgba(255,255,255,.85);
+  min-width:230px; max-width:280px;
+}
+#debug .title {
+  font-size:12px; font-weight:600; letter-spacing:.4px;
+  color:#fff; margin-bottom:6px; border-bottom:1px solid rgba(255,255,255,.12);
+  padding-bottom:5px;
+}
+#debug .row { display:flex; justify-content:space-between; gap:12px; }
+#debug .label { color:rgba(255,255,255,.45); white-space:nowrap; }
+#debug .val   { color:rgba(255,255,255,.92); text-align:right; font-weight:500; }
+#debug .divider { border:none; border-top:1px solid rgba(255,255,255,.08); margin:5px 0; }
+#debug .phase-bar {
+  width:100%; height:3px; background:rgba(255,255,255,.12);
+  border-radius:2px; margin-top:3px; overflow:hidden;
+}
+#debug .phase-fill {
+  height:100%; background:rgba(255,220,100,.7); border-radius:2px;
+  transition:width .4s;
+}
+#status {
+  position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+  z-index:200;
+  font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+  font-size:11px; color:rgba(255,255,255,.45); letter-spacing:.3px;
+}
+#status span {
+  background:rgba(0,0,0,.30); border:1px solid rgba(255,255,255,.10);
+  backdrop-filter:blur(10px); padding:4px 14px; border-radius:12px;
+  display:inline-block;
+}
+</style>
+</head>
+<body>
+<canvas id="glcanvas"></canvas>
+<!--
+<div id="debug">
+  <div class="title">🏴‍☠️ PirateWeather Live</div>
+  <div class="row"><span class="label">Condition</span><span class="val" id="d-cond">—</span></div>
+  <div class="row"><span class="label">Temp / Feels</span><span class="val" id="d-temp">—</span></div>
+  <div class="row"><span class="label">Humidity</span><span class="val" id="d-hum">—</span></div>
+  <div class="row"><span class="label">Wind</span><span class="val" id="d-wind">—</span></div>
+  <hr class="divider">
+  <div class="row"><span class="label">Sunrise</span><span class="val" id="d-sr">—</span></div>
+  <div class="row"><span class="label">Sunset</span><span class="val" id="d-ss">—</span></div>
+  <div class="row"><span class="label">Local Time</span><span class="val" id="d-time">—</span></div>
+  <div class="row"><span class="label">Sky Scene</span><span class="val" id="d-scene">—</span></div>
+  <hr class="divider">
+  <div class="row"><span class="label">Moon Phase</span><span class="val" id="d-moon">—</span></div>
+  <div class="phase-bar"><div class="phase-fill" id="d-moonbar" style="width:0%"></div></div>
+  <hr class="divider">
+  <div class="row"><span class="label">Sky Brightness</span><span class="val" id="d-bright">—</span></div>
+  <div class="row"><span class="label">Condition ID</span><span class="val" id="d-owmid">—</span></div>
+  <div class="row"><span class="label">Last Fetch</span><span class="val" id="d-fetch">—</span></div>
+</div>
+
+<div id="status"><span id="status-text">Fetching weather…</span></div>
+-->
+
+<script id="vert" type="x-shader/x-vertex">
+attribute vec2 a_pos;
+void main(){ gl_Position=vec4(a_pos,0.,1.); }
+</script>
+<script id="frag" type="x-shader/x-fragment">
+// mediump is 2-4x faster on Android (Mali/Adreno); ample precision for sky rendering
+precision mediump float;
+uniform vec2        u_res;
+uniform highp float u_time; // highp: grows unbounded; mediump loses precision after ~60 s
+uniform float u_tod;        // 0..1 fraction of day (midnight=0, noon=0.5)
+uniform float u_sunrise;    // 0..1 fraction of day
+uniform float u_sunset;     // 0..1 fraction of day
+uniform float u_moonphase;  // 0..1 (0=new, 0.25=first quarter, 0.5=full, 0.75=last quarter)
+uniform int   u_scene;
+uniform float u_clouds;
+uniform float u_wind;
+uniform float u_rain;
+uniform float u_snow;
+uniform float u_storm;
+uniform float u_fog;
+
+#define PI  3.14159265
+#define TAU 6.28318530
+
+// Hash functions — internal vars must be highp: intermediate products reach ~2000+,
+// where mediump ULP ≈ 2, causing adjacent pixels to hash identically → block artifacts.
+float h11(float p){ highp float hp=fract(p*.1031); hp*=hp+33.33; return fract(hp*(hp+hp)); }
+// NOTE on precision qualifiers below: GLSL applies the `precision mediump float;`
+// default to any *unqualified* declaration — including function parameters —
+// regardless of the precision of the value the caller passes in. u_time is a
+// highp uniform, but every function along the noise chain that took an
+// unqualified `float`/`vec2` was silently re-truncating it back to mediump at
+// the call boundary. mediump has ~10 bits of mantissa (exact integers only up
+// to ~2048), so after the page has been open a while, position/time values
+// built from u_time snap to coarse steps: clouds go blocky (wrong noise cell
+// from imprecise floor/fract) and rain freezes into static streaks (imprecise
+// mod() argument). p/t must stay highp end-to-end through this chain — see
+// wispyCloud/cloudDensity/fog/rainStreaks/snowLayer and main() below.
+float h21(highp vec2 p){ highp vec3 p3=fract(vec3(p.xyx)*vec3(.1031,.1030,.0973)); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
+vec2  h22(highp vec2 p){ highp vec3 p3=fract(vec3(p.xyx)*vec3(.1031,.1030,.0973)); p3+=dot(p3,p3.yzx+33.33); return fract((p3.xx+p3.yz)*p3.zy); }
+vec4  h14(float p){ highp vec4 p4=fract(vec4(p)*vec4(.1031,.1030,.0973,.1099)); p4+=dot(p4,p4.wzxy+33.33); return fract((p4.xxyz+p4.yzzw)*p4.zywx); }
+vec3  h23(highp vec2 p){ highp vec3 p3=fract(vec3(p.xyx)*vec3(.1031,.1030,.0973)); p3+=dot(p3,p3.yzx+33.33); return fract((p3.xxy+p3.yzz)*p3.zyx); }
+
+// ── NOISE ────────────────────────────────────────────────────────
+// p is highp: it carries the unbounded, ever-growing time-scaled coordinate
+// from the cloud/fog callers. i (the cell index fed to the hash) must stay
+// highp too; f is just the 0..1 interpolation weight so mediump is plenty.
+float n2(highp vec2 p){ highp vec2 i=floor(p); vec2 f=fract(p); f=f*f*(3.-2.*f); return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y); }
+// 2-octave fbm (was 3); no scale factor — thresholds are tuned to this range
+float fbm(highp vec2 p){ float v=0.,a=.5; mat2 r=mat2(.8,.6,-.6,.8); for(int i=0;i<2;i++){v+=a*n2(p);p=r*p*2.05+vec2(1.7,9.2);a*=.5;} return v; }
+// 2D vector warp: x and y offsets are decorrelated so neither axis tiles or repeats.
+// The cheap second fbm uses a fixed offset (3.9,1.7) rather than a full extra call.
+float wfbm(highp vec2 p){ vec2 q=vec2(fbm(p),fbm(p+vec2(3.9,1.7))); return fbm(p+2.4*q+vec2(1.7,9.2)); }
+
+// ── ASPECT ───────────────────────────────────────────────────────
+float AR(){ return u_res.x/u_res.y; }
+// Converts 0..1 UV to aspect-corrected centred coordinates
+vec2 toAsp(vec2 uv){ return vec2((uv.x-.5)*AR(), uv.y-.5); }
+
+// ── CELESTIAL POSITION (shared arc formula) ───────────────────────
+// t_norm: 0=body at east horizon, 0.5=body at peak, 1=body at west horizon
+vec2 celestialPos(float t_norm){
+  float a = clamp(t_norm*2.0-1.0, -1.0, 1.0); // -1=east, 0=noon, +1=west
+  return vec2(0.5 + a*0.40, 0.06 + (1.0-a*a)*0.76);
+}
+
+// Sun: travels from sunrise to sunset
+vec2 sunPos(){
+  float dayLen = u_sunset - u_sunrise;
+  float t_norm = clamp((u_tod - u_sunrise) / dayLen, 0.0, 1.0);
+  return celestialPos(t_norm);
+}
+
+// Moon phase shifts its rise time:
+//   phase 0 (new moon)  → rises at sunrise (near the sun)
+//   phase 0.5 (full)    → rises at sunset  (opposite the sun)
+vec2 moonPos(){
+  float dayLen   = u_sunset - u_sunrise;
+  float moonRise = mod(u_sunrise + u_moonphase * dayLen * 2.0, 1.0);
+  float moonSet  = mod(moonRise  + dayLen, 1.0);
+  float elapsed;
+  if(moonSet > moonRise){
+    // Arc doesn't cross midnight
+    elapsed = (u_tod - moonRise) / dayLen;
+  } else {
+    // Arc crosses midnight; fold time so moonRise is the origin
+    float afterMid = (u_tod < moonRise) ? u_tod + 1.0 - moonRise : u_tod - moonRise;
+    elapsed = afterMid / dayLen;
+  }
+  if(elapsed < 0.0 || elapsed > 1.0) return vec2(0.5, -0.25); // below horizon
+  return celestialPos(elapsed);
+}
+
+// ── SUN ──────────────────────────────────────────────────────────
+vec3 sunTint(){
+  float dayLen = u_sunset - u_sunrise;
+  float noon   = u_sunrise + dayLen*0.5;
+  float d      = clamp(abs(u_tod - noon) / (dayLen*0.5), 0., 1.);
+  return mix(vec3(1.,.93,.72), vec3(1.,.50,.07), d*d*d);
+}
+
+// Returns 0=night, 1=midday brightness
+float skyBrightness(){
+  float nightFd = 0.063;
+  float dayF    = clamp(
+    smoothstep(u_sunrise-nightFd, u_sunrise+nightFd*0.5, u_tod) *
+    smoothstep(u_sunset +nightFd, u_sunset -nightFd*0.5, u_tod), 0., 1.);
+  float dayLen  = u_sunset - u_sunrise;
+  float noon    = u_sunrise + dayLen*0.5;
+  float distNoon = clamp(abs(u_tod-noon)/(dayLen*0.5), 0., 1.);
+  return dayF * (1.0 - distNoon*distNoon*0.35);
+}
+
+vec3 drawSun(vec2 uv, float t){
+  vec2 sp    = toAsp(sunPos());
+  vec2 d     = toAsp(uv) - sp;
+  float dist = length(d);
+  vec3  sc   = sunTint();
+  float dayLen = u_sunset - u_sunrise;
+  float noon   = u_sunrise + dayLen*0.5;
+  float isLow  = clamp(abs(u_tod-noon)/(dayLen*0.45), 0., 1.);
+  float rad    = mix(.022, .046, isLow);
+
+  // Layered Gaussian corona
+  float g1 = exp(-dist*dist / (.38*.38)) * .32;
+  float g2 = exp(-dist*dist / (.14*.14)) * .48;
+  float g3 = exp(-dist*dist / (.055*.055)) * .62;
+  float disc = smoothstep(rad*1.6, rad*0.1, dist) * .90;
+
+  vec3 col = (g1 + g2 + g3) * sc * .55;
+  col += sc * disc;
+  return col;
+}
+
+// ── MOON with physically-correct phase shadow ─────────────────────
+vec3 drawMoon(vec2 uv, float t, vec2 mp){
+  if(mp.y <= -0.05) return vec3(0.);
+  vec2 mpAsp = toAsp(mp);
+  vec2 d    = toAsp(uv) - mpAsp;
+  float dist = length(d);
+  float rad  = .040;
+
+  // Soft outer glow
+  float g   = smoothstep(rad*2.8, rad*.9, dist);
+  vec3 col  = vec3(.78,.83,.76) * g * .12;
+  if(dist > rad) return col;
+
+  // Sphere shading
+  float z  = sqrt(max(0., rad*rad - dot(d,d))) / rad;
+  vec3 N   = normalize(vec3(d/rad, z));
+  vec3 L   = normalize(vec3(.55, -.22, .76));
+  float df = max(0., dot(N, L));
+  vec3 base= vec3(.70, .68, .62);
+
+  // Subtle craters
+  float cr = 0.;
+  vec2 c1  = mpAsp + vec2( .28*rad*AR()*.55,  .10*rad);
+  vec2 c2  = mpAsp + vec2(-.22*rad*AR()*.55, -.18*rad);
+  vec2 c3  = mpAsp + vec2( .08*rad*AR()*.55, -.25*rad);
+  cr += smoothstep(.018, .0, abs(length(toAsp(uv)-c1) - .075*rad)) * .07;
+  cr += smoothstep(.013, .0, abs(length(toAsp(uv)-c2) - .055*rad)) * .06;
+  cr += smoothstep(.009, .0, abs(length(toAsp(uv)-c3) - .040*rad)) * .05;
+  col = (base - cr) * (.28 + .72*df);
+  col *= smoothstep(-.05, .18, dot(N, normalize(vec3(-.5, .2, -.8))));
+
+  // ── PHASE SHADOW ─────────────────────────────────────────────
+  // termX = cos(phase*TAU): sweeps +1 (new) → 0 (quarter) → -1 (full) → 0 → +1
+  //
+  // FIX 1: use <= 0.5 so full moon (phase=0.5) stays in the waxing branch,
+  //        where litEdge = -1 correctly leaves the entire disc unshaded.
+  //
+  // FIX 2: for waning phases, mirror the terminator (litEdge = -termX * ...)
+  //        so waning gibbous shows most of disc lit, not mostly dark.
+  float phase    = u_moonphase;
+  float termX    = cos(phase * TAU);
+  float discX    = d.x / rad;   // -1..1 across disc
+  float discY    = d.y / rad;
+  float discR    = length(vec2(discX, discY));
+  if(discR < 1.0){
+    float inShadow;
+    float sqrtTerm = sqrt(max(0., 1.0 - discY*discY));
+    if(phase <= 0.5){
+      // Waxing: right side lit, shadow sweeps in from the left
+      float litEdge = termX * sqrtTerm;
+      inShadow = smoothstep(litEdge+0.04, litEdge-0.04, discX);
+    } else {
+      // Waning: left side lit, terminator is the mirror of termX
+      float litEdge = -termX * sqrtTerm;
+      inShadow = smoothstep(litEdge-0.04, litEdge+0.04, discX);
+    }
+    if(phase < 0.04 || phase > 0.96) inShadow = 1.0; // new moon: fully dark
+    col = mix(col, vec3(.04, .05, .08), inShadow * 0.96);
+  }
+
+  col += vec3(.78, .83, .76) * g * .12;
+  return col;
+}
+
+// ── STARS ────────────────────────────────────────────────────────
+float drawStars(vec2 uv, highp float t){
+  // SCALE 280→200: fewer cells per frame, still plenty of stars
+  float SCALE=200.; vec2 cell=floor(uv*SCALE); vec2 local=fract(uv*SCALE); float result=0.;
+  for(int iy=-1;iy<=1;iy++){for(int ix=-1;ix<=1;ix++){
+    vec2 nc=cell+vec2(float(ix),float(iy)); vec2 jit=h22(nc); float r=h21(nc+7.3);
+    if(r<.88) continue; // slightly lower threshold compensates for fewer cells
+    float sr=.009+.020*h21(nc+13.7);
+    float tw=.5+.5*sin(t*(.8+1.6*h21(nc+21.1))+h21(nc+31.9)*TAU);
+    vec2 off=local-(jit+vec2(float(ix),float(iy))); float b=smoothstep(sr,.0,length(off))*tw;
+    result+=b*(.5+.5*r);
+  }}
+  return clamp(result,0.,1.);
+}
+
+// ── SKY COLOR ─────────────────────────────────────────────────────
+vec3 skyColor(float yNorm){
+  float sr   = u_sunrise;
+  float ss   = u_sunset;
+  float ghW  = 0.031;
+
+  float goldenSR = 1.0-smoothstep(0., ghW, abs(u_tod-sr));
+  float goldenSS = 1.0-smoothstep(0., ghW, abs(u_tod-ss));
+  float golden   = max(goldenSR, goldenSS);
+
+  float nightFade = 0.063;
+  float dayFactor  = clamp(
+    smoothstep(sr-nightFade, sr+nightFade*0.5, u_tod) *
+    smoothstep(ss+nightFade, ss-nightFade*0.5, u_tod), 0., 1.);
+  float nightFactor = 1.0 - dayFactor;
+
+  vec3 dayTop     = vec3(.10,.32,.70);
+  vec3 dayMid     = vec3(.22,.52,.86);
+  vec3 dayHorizon = vec3(.55,.76,.94);
+
+  vec3 ghTop     = vec3(.20,.20,.42);
+  vec3 ghMid     = vec3(.44,.26,.38);
+  vec3 ghHorizon = vec3(.78,.40,.10);
+
+  vec3 nightTop     = vec3(.004,.007,.020);
+  vec3 nightMid     = vec3(.008,.015,.038);
+  vec3 nightHorizon = vec3(.015,.028,.060);
+
+  vec3 dayCol   = yNorm>.45 ? mix(dayMid,dayTop,(yNorm-.45)/.55)       : mix(dayHorizon,dayMid,yNorm/.45);
+  vec3 ghCol    = yNorm>.45 ? mix(ghMid,ghTop,(yNorm-.45)/.55)         : mix(ghHorizon,ghMid,yNorm/.45);
+  vec3 nightCol = yNorm>.45 ? mix(nightMid,nightTop,(yNorm-.45)/.55)   : mix(nightHorizon,nightMid,yNorm/.45);
+
+  vec3 c = mix(dayCol, ghCol, golden*dayFactor);
+  c      = mix(c,      ghCol, golden*nightFactor*0.4);
+  c      = mix(c, nightCol, nightFactor);
+  return c;
+}
+
+// ── CLOUD FUNCTIONS ───────────────────────────────────────────────
+float wispyCloud(vec2 uv, highp float t, float cov, float sc, bool warp){
+  // Pseudo-perspective: flattens and scales distant clouds near the horizon
+  vec2 st = vec2(uv.x, uv.y * (0.6 + uv.y * 0.4));
+
+  highp vec2 q = st*sc + vec2(t*(0.005 + u_wind * 0.0015), 0.);
+  float d = warp ? wfbm(q) : fbm(q);  // skip domain warp on cheaper layers
+
+  highp vec2 q2 = st*sc*2.2 + vec2(t*(0.003 + u_wind * 0.001)+3.1, 0.);
+  float det = fbm(q2);
+  
+  // Subtractive erosion: tears the noise apart for cirrus-like wind streaks
+  float shape = d - det * 0.3;
+  float core = smoothstep(0.55 - cov, 0.65, shape); // upper was 0.75; fbm peak is now ~0.75
+
+  // Isolated softer wisps trailing the core
+  float wisp = smoothstep(0.65 - cov*0.5, 0.75, det) * 0.4; // upper was 0.90
+  
+  return clamp(core + wisp*(1.0 - core), 0., 1.);
+}
+
+float cloudDensity(vec2 uv, highp float t, float cov, float sc, bool warp){
+  // Pseudo-perspective
+  vec2 st = vec2(uv.x, uv.y * (0.6 + uv.y * 0.4));
+
+  highp vec2 q = st*sc + vec2(t*(0.007 + u_wind * 0.0015), 0.);
+  float base = warp ? wfbm(q) : fbm(q);
+
+  highp vec2 q2 = st*sc*1.7 + vec2(t*(0.004 + u_wind * 0.001)+4.1, 0.);
+  float det = fbm(q2);
+  
+  // Subtractive erosion: instead of additive blurring, subtracting high-freq 
+  // noise carves out crisp edges and creates organic, billowy shapes.
+  float shape = base - det * 0.35;
+  
+  // By tightening the threshold around the eroded noise, we naturally 
+  // achieve flatter bottoms and puffier tops as the lower values fall off.
+  float density = smoothstep(0.55 - cov, 0.68, shape); // upper was 0.80; 2-oct fbm peaks ~0.75
+  
+  return clamp(density, 0., 1.);
+}
+
+vec3 cloudShade(float density, float yNorm, bool stormy, bool warm,
+                float skyBright, vec3 sunCol){
+  float T = exp(-density * 6.5);
+
+  vec3 nightShadow = vec3(.12,.14,.20);
+  vec3 nightMid    = vec3(.22,.25,.34);
+  vec3 nightBright = vec3(.36,.40,.50);
+
+  vec3 db, mt, bt;
+  if(stormy){
+    db = mix(nightShadow, vec3(.32,.34,.40), skyBright);
+    mt = mix(nightMid,    vec3(.44,.47,.53), skyBright);
+    bt = mix(nightBright, vec3(.55,.59,.64), skyBright);
+  } else if(warm){
+    db = mix(nightShadow, vec3(.34,.26,.34), skyBright);
+    mt = mix(nightMid,    vec3(.58,.45,.52), skyBright);
+    bt = mix(nightBright, vec3(.80,.66,.58), skyBright);
+  } else {
+    db = mix(nightShadow, vec3(.60,.64,.72), skyBright);
+    mt = mix(nightMid,    vec3(.88,.91,.96), skyBright);
+    bt = mix(nightBright, vec3(1.0, 1.0, 1.0), skyBright);
+  }
+
+  // Volume-based mixing: thicker parts catch more light (bt), 
+  // thinner parts stay in the mid-tone (mt) or shadow (db).
+  float volume = smoothstep(0.1, 0.9, density);
+  vec3 col = mix(db, mt, volume);
+  col = mix(col, bt, volume * volume * (0.4 + 0.6 * yNorm));
+  
+  // Increase cloud internal luminance based on sky brightness (subsurface scattering look)
+  float dayTransmission = mix(0.50, 0.82, skyBright);
+  col *= mix(1.0, dayTransmission, 1.0 - T);
+
+  float silver = smoothstep(.55,.0,density) * smoothstep(.0,.6,yNorm) * skyBright;
+  col += sunCol * silver * (0.35 + skyBright * 0.45);
+
+  if(warm){
+    float bg = smoothstep(.5,.0,yNorm)*density*skyBright*.6;
+    col = mix(col, vec3(.92,.52,.28)*1.1, bg*.45);
+  }
+  return col;
+}
+
+// ── RAIN ─────────────────────────────────────────────────────────
+// fc and t are highp: fc carries raw pixel coords (can exceed mediump's exact
+// range on large/high-DPI canvases) and t*speed*60 grows large as the page
+// stays open; either losing precision makes `along` (and therefore the mod-
+// wrapped streak position) freeze into static steps instead of animating —
+// see the note above n2/h21 for why the parameter qualifier itself matters.
+float rainStreaks(highp vec2 fc, highp float t, float leanDeg, float speed, float seed){
+  float sh=tan(leanDeg*PI/180.0);
+  float colX=fc.x+fc.y*sh; float colPx=9.; float colIdx=floor(colX/colPx);
+  vec4 r = h14(colIdx*1.3+seed*77.7);
+  float phase=r.x;
+  float xJit=(r.y-.5)*colPx*.5;
+  float xLocal=mod(colX+xJit,colPx)-colPx*.5;
+  float sLen=22.+28.*r.z;
+  highp float along=mod(fc.y+t*speed*60.+phase*700.,150.+sLen);
+  return smoothstep(0.,5.,float(along))*smoothstep(sLen,sLen*.3,float(along))*exp(-xLocal*xLocal/(1.3*1.3))*(0.38+0.62*r.w);
+}
+
+// ── SNOW ─────────────────────────────────────────────────────────
+// Same precision chain as rain above: fc, t, and every local derived from
+// them before the final floor()/fract() (sx, sc, cell, nc) must stay highp
+// or flakes freeze/tear apart after the page has been open a while.
+float snowLayer(highp vec2 fc, highp float t, float seed, float cellPx, float rMin, float rMax, float spd, float sway, float blur, float wind){
+  highp float sx=fc.x - t * wind * (cellPx / 15.0) + sin(t*0.45+seed*3.7)*sway;
+  highp float sy=fc.y+t*spd;
+  highp vec2 sc=vec2(sx,sy); highp vec2 cell=floor(sc/cellPx); vec2 local=fract(sc/cellPx); float result=0.;
+  for(int iy=-1;iy<=1;iy++){for(int ix=-1;ix<=1;ix++){
+    highp vec2 nc=cell+vec2(float(ix),float(iy));
+    vec3 h=h23(nc+seed*3.71);
+    if(h.z<.45) continue;
+    float r_size = (h.z - 0.45) / 0.55;
+    float fr=rMin+(rMax-rMin)*r_size;
+    vec2 off=(local-(h.xy+vec2(float(ix),float(iy))))*cellPx; float dist=length(off);
+    float a=exp(-dist*dist/((fr*blur)*(fr*blur))); a=max(a,smoothstep(fr,fr*.2,dist));
+    result+=clamp(a,0.,1.)*(0.5+0.5*r_size);
+  }}
+  return clamp(result,0.,1.);
+}
+
+// ── FOG ──────────────────────────────────────────────────────────
+float fog(vec2 uv, highp float t){
+  float f1=fbm(uv*2.8+vec2(t*.010,0.))*fbm(uv*4.2+vec2(-t*.007,t*.003));
+  return smoothstep(.16,.62,f1);
+}
+
+// ── MAIN ─────────────────────────────────────────────────────────
+void main(){
+  vec2 uv              = gl_FragCoord.xy / u_res;
+  highp vec2 fragCoord = gl_FragCoord.xy; // stays highp: feeds rain/snow, see notes above
+  highp float t        = u_time;          // stays highp: feeds the whole cloud/rain/snow/fog chain
+
+  bool isClearDay=u_scene==0, isNight=u_scene==1, isDawn=u_scene==2, isDusk=u_scene==3;
+  bool isCloudy=u_scene==4, isOvercast=u_scene==5, isRain=u_scene==6;
+  bool isStorm=u_scene==7, isSnow=u_scene==8, isFog=u_scene==9;
+  bool isWarm = isDawn || isDusk;
+  bool isDark  = isRain || isStorm || isOvercast;
+
+  // ── DYNAMIC SKY ──────────────────────────────────────────────
+  vec3 sky;
+  if(isClearDay || isNight || isDawn || isDusk){
+    sky = skyColor(uv.y);
+  } else {
+    vec3 skyTop, skyMid, skyHorizon;
+    if(isCloudy)         { skyTop=vec3(.14,.20,.32); skyMid=vec3(.22,.30,.46); skyHorizon=vec3(.38,.48,.62); }
+    else if(isOvercast)  { skyTop=vec3(.12,.14,.18); skyMid=vec3(.18,.20,.26); skyHorizon=vec3(.30,.34,.42); }
+    else if(isRain)      { skyTop=vec3(.10,.12,.16); skyMid=vec3(.18,.22,.28); skyHorizon=vec3(.28,.32,.40); }
+    else if(isStorm)     { skyTop=vec3(.02,.03,.05); skyMid=vec3(.04,.06,.10); skyHorizon=vec3(.08,.12,.18); }
+    else if(isSnow)      { skyTop=vec3(.68,.70,.74); skyMid=vec3(.66,.72,.80); skyHorizon=vec3(.54,.62,.72); }
+    else                 { skyTop=vec3(.44,.48,.52); skyMid=vec3(.56,.60,.63); skyHorizon=vec3(.68,.70,.72); }
+    sky = uv.y>.45 ? mix(skyMid,skyTop,(uv.y-.45)/.55) : mix(skyHorizon,skyMid,uv.y/.45);
+  }
+
+  // ── SUN ───────────────────────────────────────────────────────
+  bool sunUp = u_tod > u_sunrise && u_tod < u_sunset;
+  if(sunUp && !isOvercast && !isStorm){
+    float dim = isCloudy ? .38 : (isSnow ? .38 : (isRain ? .12 : 1.0));
+    sky += drawSun(uv, t) * dim;
+  }
+
+  // ── MOON ──────────────────────────────────────────────────────
+  // FIX: isDaytime now correctly equals 1 at midday and 0 at night.
+  // Previously the sunset smoothstep arguments were reversed, causing
+  // isDaytime to be 0 all day and 1 all night (stars/moon were inverted).
+  float ghW      = 0.031;
+  float isDaytime = smoothstep(u_sunrise+ghW*0.5, u_sunrise+ghW*1.5, u_tod)
+                  * smoothstep(u_sunset +ghW*0.5, u_sunset -ghW*0.5, u_tod); // ← fixed: args reversed
+  float moonVis = clamp(1.0 - isDaytime*0.98, 0., 1.);
+  if(isRain||isStorm||isOvercast) moonVis = 0.;
+  vec2 mp = moonPos();
+  if(mp.y > -0.05 && moonVis > 0.01){
+    sky += drawMoon(uv, t, mp) * moonVis;
+  }
+
+  // ── STARS ──────────────────────────────────────────────────────
+  float starVis = clamp(1.0 - isDaytime, 0., 1.);
+  if(isRain||isStorm||isOvercast||isSnow||isFog) starVis = 0.;
+  if(isCloudy) starVis *= 0.05;
+  if(starVis > 0.01){
+    float sm = starVis * smoothstep(.30,.70, uv.y);
+    sky += vec3(.90,.94,1.) * drawStars(uv,t) * sm;
+  }
+
+  // ── CLOUDS ───────────────────────────────────────────────────
+  float density   = 0.;
+  float cloudMask = smoothstep(.05,.35,uv.y) * smoothstep(0.95,.75,uv.y);
+
+  if (cloudMask > 0.01 && !((isClearDay || isNight) && u_clouds < 0.01)) {
+    // Scale coverage based on the u_clouds uniform (0.4 for partly cloudy)
+    if(isCloudy){
+      float d1 = wispyCloud(uv, t,         0.15 + u_clouds * 0.38, 2.0, true);
+      float d2 = wispyCloud(uv, t*1.1+20., 0.10 + u_clouds * 0.28, 2.9, false); // plain fbm for d2
+      density  = max(d1, d2*0.62) * cloudMask;
+    } else {
+      float cov1, cov2, csc1, csc2; bool warpC=false;
+      if(isClearDay||isNight||isDawn||isDusk){
+        cov1=0.1 + u_clouds*0.2; cov2=0.05 + u_clouds*0.15; csc1=2.6; csc2=4.0;
+        if(isDawn||isDusk){ cov1=.44; cov2=.28; warpC=true; }
+      }
+      else if(isOvercast){ cov1=.38; cov2=.22; csc1=1.4; csc2=2.2; warpC=true; }
+      else if(isRain)    { cov1=.34; cov2=.18; csc1=1.5; csc2=2.2; warpC=true; }
+      else if(isStorm)   { cov1=.44; cov2=.28; csc1=1.3; csc2=1.9; warpC=true; }
+      else if(isSnow)    { cov1=.28; cov2=.12; csc1=1.7; csc2=2.6; warpC=true; }
+      else               { cov1=.36; cov2=.22; csc1=2.0; csc2=3.1; }
+      float d1 = cloudDensity(uv, t,         cov1, csc1, warpC);
+      float d2 = cloudDensity(uv, t*1.2+30., cov2, csc2, false); // d2 always plain fbm
+      density  = max(d1, d2*0.70) * cloudMask;
+    }
+  }
+
+  if(density > .004){
+    float yNorm     = smoothstep(.10, .90, uv.y);
+    float skyBright = skyBrightness();
+    vec3  cCol      = cloudShade(density, yNorm, isDark, isWarm, skyBright, sunTint());
+    sky = mix(sky, cCol, clamp(density, 0., 1.));
+  }
+
+  // ── FOG ──────────────────────────────────────────────────────
+  if(isFog){
+    float f = fog(uv, t);
+    sky = mix(sky, mix(vec3(.58,.62,.65), vec3(.78,.81,.83), uv.y), f*.84);
+    sky = mix(sky, vec3(.70,.73,.75), smoothstep(.38,.0,uv.y)*.72);
+  }
+
+  // ── RAIN ─────────────────────────────────────────────────────
+  if(u_rain > 0.01){
+    float lean = 2.0 + u_wind * 0.4;
+    float spd  = 8.0 + u_wind * 0.3;
+    float r1=rainStreaks(fragCoord,t,lean,    spd,   0.)*.44;
+    float r2=rainStreaks(fragCoord,t,lean+2., spd*.9,1.)*.32; // boosted slightly to compensate for removed 3rd layer
+    vec3 rCol=isStorm?vec3(.44,.52,.64):vec3(.62,.70,.82);
+    sky+=rCol*(r1+r2)*u_rain;
+    sky*=1.-smoothstep(.50,.0,uv.y)*u_rain*0.25;
+  }
+
+  // ── SNOW ─────────────────────────────────────────────────────
+  if(u_snow > 0.01){
+    // 2 layers instead of 3; bg layer removed (least visible, most costly)
+    float mg=snowLayer(fragCoord,t,1.,36.,3.5,7.0, 15.,9., 1.5, u_wind);
+    float fg=snowLayer(fragCoord,t,2.,60.,8.0,18.0,35.,13.,2.6, u_wind);
+    sky+=vec3(.96,.97,1.)*mg*.60 * u_snow; // slightly boosted to compensate
+    sky+=vec3(.94,.96,1.)*fg*.44 * u_snow;
+  }
+
+  // ── LIGHTNING ────────────────────────────────────────────────
+  if(isStorm){
+    float lt1=mod(t*.28,8.2); float fl=smoothstep(0.,.04,lt1)*smoothstep(.22,.12,lt1);
+    fl+=smoothstep(0.,.03,mod(t*.28+4.1,8.2))*smoothstep(.16,.09,mod(t*.28+4.1,8.2))*.55;
+    sky=mix(sky,vec3(.76,.82,.94),fl*.52 * u_storm);
+  }
+
+  // ── HORIZON ATMOSPHERE ───────────────────────────────────────
+  float hb=smoothstep(.26,.0,uv.y);
+  vec3 ha;
+  if(isStorm)     ha=vec3(.09,.10,.13);
+  else if(isRain) ha=vec3(.20,.23,.28);
+  else if(isSnow) ha=vec3(.48,.54,.62);
+  else if(isFog)  ha=vec3(.54,.57,.60);
+  else {
+    float nightFade=.063;
+    float dayF=clamp(smoothstep(u_sunrise-nightFade,u_sunrise+nightFade*.5,u_tod)*smoothstep(u_sunset+nightFade,u_sunset-nightFade*.5,u_tod),0.,1.);
+    float ghSR=1.-smoothstep(0.,.031,abs(u_tod-u_sunrise));
+    float ghSS=1.-smoothstep(0.,.031,abs(u_tod-u_sunset));
+    float gh=max(ghSR,ghSS)*dayF + max(ghSR,ghSS)*(1.-dayF)*0.4;
+    ha=mix(vec3(.015,.028,.060), mix(vec3(.60,.32,.08), vec3(.56,.76,.94), dayF), gh + dayF*(1.-gh));
+  }
+  sky = mix(sky, ha, hb*.44);
+
+  // ── TONE MAP + GAMMA ─────────────────────────────────────────
+  sky = max(sky, vec3(0.));
+  sky = sky/(sky+vec3(.9)) * (1.+sky/vec3(4.));
+  sky = clamp(sky, 0., 1.);
+  sky = pow(sky, vec3(.4545));
+  vec2 vig = uv*(1.-uv.yx);
+  sky *= pow(vig.x*vig.y*20., .055);
+  gl_FragColor = vec4(sky, 1.);
+}
+</script>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// ── HOME ASSISTANT CONNECTION ──────────────────────────────────────
+//
+// Served by the View Assist Rundown Tweaks integration and shown inside a
+// same-origin iframe (the Rundown clock view, or a View Assist background
+// that points at this page). It reads the signed-in user's live `hass`
+// object from an ancestor window, so no URL or access token is stored here.
+//
+// Entity selection, first match wins:
+//   1. ?weather=weather.xxx URL parameter
+//   2. the View Assist device's own weather_entity attribute
+//   3. the first weather.* entity in Home Assistant
+// Optional Pirate Weather sensors (sunrise/sunset/moon phase/cloud cover)
+// are still used automatically when they exist.
+// ═══════════════════════════════════════════════════════════════════
+const PARAMS = new URLSearchParams(window.location.search);
+const SUN_ENTITY = PARAMS.get('sun') || 'sun.sun';
+
+function findHass() {
+  let w = window;
+  for (let i = 0; i < 6; i++) {
+    try {
+      const ha = w.document.querySelector('home-assistant');
+      if (ha && ha.hass) return ha.hass;
+    } catch (e) {
+      return null; // cross-origin ancestor — stop walking
+    }
+    if (w.parent === w) break;
+    w = w.parent;
+  }
+  return null;
+}
+
+function weatherEntityId(hass) {
+  const explicit = PARAMS.get('weather');
+  if (explicit && hass.states[explicit]) return explicit;
+  try {
+    const va = localStorage.getItem('view_assist_sensor');
+    const e = va && hass.states[va] && hass.states[va].attributes.weather_entity;
+    if (e && hass.states[e]) return e;
+  } catch (e) { /* storage blocked */ }
+  return Object.keys(hass.states).find(id => id.startsWith('weather.')) || '';
+}
+
+// ── GL SETUP ──────────────────────────────────────────────────────
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+
+// Render at 65% resolution — bigger GPU win than 75%; CSS stretching is seamless.
+// At 65% the pixel count is ~42% of native vs ~56% at 75%.
+const RENDER_SCALE = 0.65;
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+  return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER,   document.getElementById('vert').text));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, document.getElementById('frag').text));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,-1, 1,1, -1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uRes       = gl.getUniformLocation(prog, 'u_res');
+const uTime      = gl.getUniformLocation(prog, 'u_time');
+const uTod       = gl.getUniformLocation(prog, 'u_tod');
+const uSunrise   = gl.getUniformLocation(prog, 'u_sunrise');
+const uSunset    = gl.getUniformLocation(prog, 'u_sunset');
+const uMoonphase = gl.getUniformLocation(prog, 'u_moonphase');
+const uScene     = gl.getUniformLocation(prog, 'u_scene');
+const uClouds    = gl.getUniformLocation(prog, 'u_clouds');
+const uWind      = gl.getUniformLocation(prog, 'u_wind');
+const uRain      = gl.getUniformLocation(prog, 'u_rain');
+const uSnow      = gl.getUniformLocation(prog, 'u_snow');
+const uStorm     = gl.getUniformLocation(prog, 'u_storm');
+const uFog       = gl.getUniformLocation(prog, 'u_fog');
+
+let W, H;
+function resize() {
+  W = canvas.width  = Math.round(window.innerWidth  * RENDER_SCALE);
+  H = canvas.height = Math.round(window.innerHeight * RENDER_SCALE);
+  gl.viewport(0, 0, W, H);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── STATE ─────────────────────────────────────────────────────────
+let state = {
+  scene: 0,
+  tod: 0.5,
+  sunrise: 6.5/24,
+  sunset: 19.75/24,
+  moonPhase: 0,
+  weatherId: 800,
+  cloudCover: null,   // direct 0..1 value from PW sensor when available
+  firstFetch: true,
+  weather: {
+    clouds: 0, wind: 5, rain: 0, snow: 0, storm: 0, fog: 0,
+    targets: { clouds: 0, wind: 5, rain: 0, snow: 0, storm: 0, fog: 0 }
+  }
+};
+const start = performance.now();
+
+const setUI = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+
+// The #debug panel markup is commented out of the DOM (see <body> above), so
+// every getElementById('d-*') call in render() is a guaranteed no-op — but it
+// still costs a DOM lookup + string formatting every frame, forever. Check
+// presence once up front and skip that whole block when it's not there.
+const DEBUG_UI = !!document.getElementById('debug');
+
+// ── RENDER LOOP ───────────────────────────────────────────────────
+// Cap at 24 fps — saves ~20% GPU vs 30 fps; weather motion is imperceptible above ~20 fps.
+const TARGET_INTERVAL = 1000 / 24;
+let lastFrameTs = 0;
+let lastTodSecond = -1;
+
+function render(timestamp) {
+  requestAnimationFrame(render);
+
+  // Skip frames to hold ~24 fps
+  if (timestamp - lastFrameTs < TARGET_INTERVAL) return;
+  lastFrameTs = timestamp - ((timestamp - lastFrameTs) % TARGET_INTERVAL);
+
+  // tod only needs per-second precision; skip the Date() call on every frame
+  const nowSec = Math.floor(timestamp / 1000);
+  if (nowSec !== lastTodSecond) {
+    const now = new Date();
+    state.tod = (now.getHours()*3600 + now.getMinutes()*60 + now.getSeconds()) / 86400;
+    lastTodSecond = nowSec;
+    // Scene and target uniforms only change with time-of-day or weather —
+    // recalculate here instead of every frame to keep JS overhead minimal.
+    state.scene = sceneFromAPI(state.weatherId, state.tod, state.sunrise, state.sunset);
+    updateWeatherTargets(state.weatherId);
+  }
+
+  const lerpRate = 0.03;
+  const w = state.weather;
+  if (state.firstFetch) {
+    w.clouds = w.targets.clouds;
+    w.wind   = w.targets.wind;
+    w.rain   = w.targets.rain;
+    w.snow   = w.targets.snow;
+    w.storm  = w.targets.storm;
+    w.fog    = w.targets.fog;
+    state.firstFetch = false;
+  } else {
+    w.clouds += (w.targets.clouds - w.clouds) * lerpRate;
+  w.wind   += (w.targets.wind   - w.wind)   * lerpRate;
+    w.rain   += (w.targets.rain   - w.rain)   * lerpRate;
+    w.snow   += (w.targets.snow   - w.snow)   * lerpRate;
+    w.storm  += (w.targets.storm  - w.storm)  * lerpRate;
+    w.fog    += (w.targets.fog    - w.fog)    * lerpRate;
+  }
+
+  const t = (performance.now() - start) * .001;
+  gl.uniform2f(uRes,       W, H);
+  gl.uniform1f(uTime,      t);
+  gl.uniform1f(uTod,       state.tod);
+  gl.uniform1f(uSunrise,   state.sunrise);
+  gl.uniform1f(uSunset,    state.sunset);
+  gl.uniform1f(uMoonphase, state.moonPhase);
+  gl.uniform1i(uScene,     state.scene);
+  gl.uniform1f(uClouds,    w.clouds);
+  gl.uniform1f(uWind,      w.wind);
+  gl.uniform1f(uRain,      w.rain);
+  gl.uniform1f(uSnow,      w.snow);
+  gl.uniform1f(uStorm,     w.storm);
+  gl.uniform1f(uFog,       w.fog);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+  if (DEBUG_UI) {
+    setUI('d-time', fmtTime(state.tod * 1440));
+    const sb = computeSkyBrightness(state.tod, state.sunrise, state.sunset);
+    setUI('d-bright', Math.round(sb * 100) + '%');
+    setUI('d-scene', SCENE_NAMES[state.scene]);
+  }
+}
+requestAnimationFrame(render);
+
+// ── HELPERS ──────────────────────────────────────────────────────
+function fmtTime(mins) {
+  let h = Math.floor(mins / 60) % 24, m = Math.floor(mins % 60);
+  const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+  return `${h}:${String(m).padStart(2,'0')} ${ap}`;
+}
+
+// Convert an ISO 8601 datetime string to a fraction-of-day (0..1) in local time
+function isoToTod(iso) {
+  const d = new Date(iso);
+  return (d.getHours()*3600 + d.getMinutes()*60 + d.getSeconds()) / 86400;
+}
+
+function computeMoonPhase() {
+  const synodicMonth = 29.53058867 * 86400;
+  const knownNew = 946936440; // Jan 6 2000 UTC (known new moon)
+  const phase = ((Date.now()/1000 - knownNew) % synodicMonth) / synodicMonth;
+  return phase < 0 ? phase + 1 : phase;
+}
+
+function computeSkyBrightness(tod, sr, ss) {
+  const nightFd = 0.063;
+  const dayF = Math.max(0, Math.min(1,
+    smoothstepJS(sr-nightFd, sr+nightFd*0.5, tod) *
+    smoothstepJS(ss+nightFd, ss-nightFd*0.5, tod)));
+  const noon = (sr + ss) * 0.5;
+  const distNoon = Math.min(1, Math.abs(tod-noon) / ((ss-sr)*0.5));
+  return dayF * (1 - distNoon*distNoon*0.35);
+}
+
+function smoothstepJS(e0, e1, x) {
+  const t = Math.max(0, Math.min(1, (x-e0)/(e1-e0)));
+  return t*t*(3-2*t);
+}
+
+const SCENE_NAMES = ['☀️ Clear Day','🌙 Clear Night','🌅 Dawn','🌇 Dusk',
+  '⛅ Cloudy','☁️ Overcast','🌧 Rain','⛈ Storm','🌨 Snow','🌫 Fog'];
+const PHASE_NAMES = ['🌑 New Moon','🌒 Waxing Crescent','🌓 First Quarter',
+  '🌔 Waxing Gibbous','🌕 Full Moon','🌖 Waning Gibbous','🌗 Last Quarter','🌘 Waning Crescent'];
+
+function phaseLabel(p) { return PHASE_NAMES[Math.round(p * 8) % 8]; }
+
+function windDir(deg) {
+  const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+  return dirs[Math.round(deg/45) % 8];
+}
+
+function updateWeatherTargets(id) {
+  const t = state.weather.targets;
+  t.clouds=0; t.rain=0; t.snow=0; t.storm=0; t.fog=0;
+  t.wind = state.windSpeed ?? 5;
+
+  if      (id >= 200 && id < 300) { t.storm=1; t.rain=1; t.clouds=1; }
+  else if (id >= 300 && id < 600) { 
+    t.rain = (id === 502 || id === 504) ? 1.0 : 0.45; // 502 is Pouring
+    t.clouds = (id === 502 || id === 504) ? 0.9 : 0.65;
+  }
+  else if (id >= 600 && id < 700) { t.snow=1; t.clouds=0.7; }
+  else if (id >= 700 && id < 800) { t.fog=1; }
+  else if (id === 800)             { t.clouds=0; }
+  else if (id === 801)             { t.clouds=0.18; }
+  else if (id === 802)             { t.clouds=0.32; }
+  else                             { t.clouds=1; }
+
+  // If PirateWeather gave us a direct cloud cover reading, use it
+  // for non-precipitation scenes where the derived value is just an estimate.
+  if (state.cloudCover !== null && id >= 800) {
+    t.clouds = state.cloudCover;
+  }
+}
+
+function sceneFromAPI(id, tod, sr, ss) {
+  const ghW = 0.031;
+  if (tod > sr - ghW*1.5 && tod < sr + ghW)   return 2; // dawn
+  if (tod > ss - ghW     && tod < ss + ghW*1.5) return 3; // dusk
+  const isNight = tod < sr || tod > ss;
+  if (isNight) {
+    if (id>=200&&id<300) return 7;
+    if (id>=300&&id<700) return 6;
+    if (id>=700&&id<800) return 9;
+    if (id>800)          return 5;
+    return 1;
+  }
+  if (id>=200&&id<300) return 7;
+  if (id>=300&&id<600) return 6;
+  if (id>=600&&id<700) return 8;
+  if (id>=700&&id<800) return 9;
+  if (id===800)        return 0;
+  if (id<=803)         return 4; // Move 'cloudy/windy' into the blue-sky scene
+  return 5;
+}
+
+// ── PIRATE WEATHER CONDITION → INTERNAL ID MAP ────────────────────
+// Maps Home Assistant standard weather condition strings (which
+// PirateWeather uses via its weather entity) to OWM-style numeric IDs
+// used internally by the scene selector above.
+function conditionToId(cond) {
+  const map = {
+    'sunny':           800,
+    'clear':           800,
+    'clear-night':     800,
+    'partlycloudy':    802,
+    'cloudy':          803,
+    'fog':             741,
+    'rain':            500,
+    'rainy':           500,
+    'pouring':         502,
+    'snow':            601,
+    'snowy':           601,
+    'snowy-rainy':     611,
+    'sleet':           611,
+    'hail':            622,
+    'lightning':       200,
+    'lightning-rainy': 200,
+    'thunderstorm':    200,
+    'windy':           803,
+    'windy-variant':   803,
+    'exceptional':     771,
+  };
+  return map[cond] ?? 803;
+}
+
+// ── HOME ASSISTANT STATE HELPER ────────────────────────────────────
+// States come from the parent frontend's live hass object — no network.
+async function haGet(entityId) {
+  const hass = findHass();
+  if (!hass) throw new Error('Home Assistant session not found — open this page inside Home Assistant');
+  const s = entityId && hass.states[entityId];
+  if (!s) throw new Error(`${entityId || 'weather entity'}: not found`);
+  return s;
+}
+
+// ── FETCH WEATHER FROM PIRATE WEATHER / HA ────────────────────────
+async function fetchWeather() {
+  setUI('status-text', 'Fetching weather…');
+  try {
+    // All requests run in parallel. PW sensor entities are optional —
+    // if they 404 (not configured) we fall back gracefully.
+    const [weatherResult, sunResult, pwSunriseResult, pwSunsetResult, moonResult, cloudResult] =
+      await Promise.allSettled([
+        haGet(weatherEntityId(findHass() || { states: {} })),
+        haGet(SUN_ENTITY),
+        haGet('sensor.pirateweather_sunrise_time_0'),
+        haGet('sensor.pirateweather_sunset_time_0'),
+        haGet('sensor.pirateweather_moon_phase_0'),
+        haGet('sensor.pirateweather_cloud_cover'),
+      ]);
+
+    // ── Weather entity (required) ──────────────────────────────────
+    if (weatherResult.status === 'rejected') throw weatherResult.reason;
+    const wd   = weatherResult.value;
+    const cond = wd.state;           // e.g. 'partlycloudy', 'rainy', 'snowy'
+    const attr = wd.attributes;
+
+    state.weatherId = conditionToId(cond);
+    state.windSpeed = attr.wind_speed;
+
+    // ── Sunrise / Sunset ───────────────────────────────────────────
+    // Prefer PirateWeather's own daily sensors (exact today's times).
+    // Fall back to sun.sun's next_rising / next_setting (always available;
+    // time-of-day fraction is the same within a minute day-to-day).
+    let srSet = false, ssSet = false;
+
+    if (pwSunriseResult.status === 'fulfilled') {
+      const sr = isoToTod(pwSunriseResult.value.state);
+      if (!isNaN(sr)) { state.sunrise = sr; srSet = true; }
+    }
+    if (pwSunsetResult.status === 'fulfilled') {
+      const ss = isoToTod(pwSunsetResult.value.state);
+      if (!isNaN(ss)) { state.sunset = ss; ssSet = true; }
+    }
+
+    if ((!srSet || !ssSet) && sunResult.status === 'fulfilled') {
+      const sa = sunResult.value.attributes;
+      if (!srSet && sa.next_rising)  state.sunrise = isoToTod(sa.next_rising);
+      if (!ssSet && sa.next_setting) state.sunset  = isoToTod(sa.next_setting);
+    }
+
+    // ── Moon phase ─────────────────────────────────────────────────
+    // Use PirateWeather's daily moon_phase sensor if available (0..1),
+    // otherwise compute astronomically from the known synodic cycle.
+    if (moonResult.status === 'fulfilled') {
+      const mp = parseFloat(moonResult.value.state);
+      if (!isNaN(mp)) state.moonPhase = mp;
+    } else {
+      state.moonPhase = computeMoonPhase();
+    }
+
+    // ── Cloud cover ────────────────────────────────────────────────
+    // PW's cloud_cover sensor (0..1) lets us set the cloud density
+    // precisely rather than approximating from the condition string.
+    if (cloudResult.status === 'fulfilled') {
+      const cc = parseFloat(cloudResult.value.state);
+      if (!isNaN(cc)) state.cloudCover = Math.max(0, Math.min(1, cc));
+    } else {
+      state.cloudCover = null; // will be estimated from condition
+    }
+
+    // ── Debug panel ────────────────────────────────────────────────
+    const condLabel = cond.replace(/-/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+    setUI('d-cond', condLabel);
+    if (attr.temperature != null)
+      setUI('d-temp', `${Math.round(attr.temperature)}° / ${Math.round(attr.apparent_temperature ?? attr.temperature)}°`);
+    if (attr.humidity != null) {
+      const hPct = attr.humidity > 1 ? Math.round(attr.humidity) : Math.round(attr.humidity * 100);
+      setUI('d-hum', `${hPct}%`);
+    }
+    if (attr.wind_speed != null)
+      setUI('d-wind', `${Math.round(attr.wind_speed)} mph ${windDir(attr.wind_bearing ?? 0)}`);
+    setUI('d-sr',   fmtTime(state.sunrise  * 1440));
+    setUI('d-ss',   fmtTime(state.sunset   * 1440));
+    setUI('d-moon', phaseLabel(state.moonPhase));
+    const mb = document.getElementById('d-moonbar');
+    if (mb) mb.style.width = (state.moonPhase * 100) + '%';
+    setUI('d-owmid', `${state.weatherId} ← ${cond}`);
+    setUI('d-fetch', new Date().toLocaleTimeString());
+    setUI('status-text', `${condLabel} · ${Math.round(attr.temperature ?? 0)}°`);
+
+  } catch (e) {
+    console.error('[PirateWeather HA]', e);
+    setUI('status-text', '⚠ ' + e.message);
+    setUI('d-fetch', 'Error: ' + e.message);
+    // Graceful fallback: clear sky, computed moon phase, default sun times
+    state.weatherId  = 800;
+    state.cloudCover = null;
+    state.moonPhase  = computeMoonPhase();
+  }
+}
+
+// Reading local hass state is free, so refresh every minute; the first
+// read waits briefly in case the parent frontend is still connecting.
+setTimeout(fetchWeather, 1500);
+setInterval(fetchWeather, 60_000);
+
+// Stop when View Assist Rundown Tweaks is disabled or removed: reloading then
+// gets Home Assistant's "disabled" page instead of this one.
+async function checkEnabled() {
+  const hass = findHass();
+  if (!hass) return;
+  try {
+    const res = await hass.callWS({ type: 'va_rundown_tweaks/status' });
+    if (!res.loaded) location.reload();
+  } catch (err) {
+    if (err && err.code === 'unknown_command') location.reload();
+  }
+}
+setInterval(checkEnabled, 60_000);
+</script>
+</body>
+</html>

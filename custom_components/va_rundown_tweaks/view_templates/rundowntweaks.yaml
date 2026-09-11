@@ -1,0 +1,7 @@
+# View Assist "rundowntweaks" view — the full Rundown dashboard, full screen, on a
+# View Assist device. Installed by the View Assist Rundown Tweaks integration; copy
+# to user_rundowntweaks.yaml in the same folder to customise.
+type: custom:va-rundown-tweaks-card
+fullscreen: true
+variables:
+  rundowntweaksversion: 0.0.0

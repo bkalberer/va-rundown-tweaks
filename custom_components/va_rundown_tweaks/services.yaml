@@ -1,0 +1,8 @@
+install_view_assist_assets:
+  fields:
+    force:
+      required: false
+      default: false
+      selector:
+        boolean:
+remove_view_assist_assets:

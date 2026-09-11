@@ -1,0 +1,209 @@
+# View Assist "rundowntweaksclock" view — the Rundown-styled clock.
+#
+# Installed by the View Assist Rundown Tweaks integration into
+# config/view_assist/views/rundowntweaksclock/rundowntweaksclock.yaml and loaded with
+# view_assist.load_asset. To customise it, copy that file to
+# user_rundowntweaksclock.yaml in the same folder; View Assist prefers the user_
+# copy. The var_rundown_* variables below are filled from the integration's
+# options at install time; the values here are only fallbacks.
+type: custom:button-card
+variables:
+  rundowntweaksclockversion: 0.0.0
+  var_rundown_thermostat: ""
+  var_rundown_background: view_assist
+  var_rundown_sky_url: /va_rundown_tweaks/static/sky.html
+  var_rundown_sidebar_pad: 0px
+  var_rundown_sidebar_side: right
+  var_is_night: >-
+    [[[ try { var s = hass.states[variables.var_assistsat_entity]; return !!(s && s.attributes.mode === "night"); } catch (e) { return false; } ]]]
+  var_background: >-
+    [[[ try { var s = hass.states[variables.var_assistsat_entity]; if (!s || s.attributes.mode === "night") return ""; return s.attributes.background || ""; } catch (e) { return ""; } ]]]
+  var_rundown_time: >-
+    [[[ var fmt = variables.var_assistsat_entity_use_24_hour_time ? '%H:%M' : '%l:%M';
+    return `<viewassist-clock server_time=true format='${fmt}'></viewassist-clock>`; ]]]
+  var_rundown_date: >-
+    [[[ return `<viewassist-clock server_time=true format='%a, %b %e'></viewassist-clock>`; ]]]
+  var_rundown_weather_entity: >-
+    [[[ var e = variables.var_assistsat_entity_weather_entity;
+    if (e && hass.states[e]) return e;
+    return Object.keys(hass.states).find(function (id) { return id.indexOf('weather.') === 0; }) || ''; ]]]
+template:
+  - variable_template
+  - responsive_base
+  - body_template
+styles:
+  grid:
+    - grid-template-areas: '"title thermo status" "time time time" "date date date"'
+    - grid-template-rows: >-
+        [[[ return (window.viewAssistResponsive && window.viewAssistResponsive.orientation === "portrait") ? "15vh 35vh 15vh" : "15vh 50vh 15vh"; ]]]
+    - grid-template-columns: auto auto 1fr
+  card:
+    - background: "[[[ return `center / cover no-repeat url(${variables.var_background})` ]]]"
+    - background-size: cover
+    - background-color: "#080909"
+    - position: relative
+    - padding-right: >-
+        [[[ return variables.var_rundown_sidebar_side === 'left' ? '0px' : variables.var_rundown_sidebar_pad; ]]]
+    - padding-left: >-
+        [[[ return variables.var_rundown_sidebar_side === 'left' ? variables.var_rundown_sidebar_pad : '0px'; ]]]
+    - box-sizing: border-box
+    - font-family: "'IBM Plex Sans', 'Helvetica Neue', sans-serif"
+    - "-webkit-font-smoothing": antialiased
+  custom_fields:
+    bgframe:
+      - position: absolute
+      - top: "0"
+      - left: "0"
+      - width: 100%
+      - height: 100%
+      - overflow: hidden
+      - pointer-events: none
+      - opacity: "[[[ return variables.var_is_night ? '0.2' : '1'; ]]]"
+    title:
+      - display: grid
+      - opacity: "[[[ return variables.var_is_night ? '35%' : '100%'; ]]]"
+    thermo:
+      - display: grid
+      - align-self: center
+      - justify-self: start
+      - z-index: "1"
+      - line-height: "1"
+      - font-size: >-
+          [[[ return (window.viewAssistResponsive && window.viewAssistResponsive.orientation === "portrait") ? "3.2vh" : "5vh"; ]]]
+      - padding-left: clamp(8px, 1.2vw, 20px)
+      - margin-left: clamp(8px, 1.2vw, 20px)
+      - border-left: >-
+          [[[ var t = variables.var_rundown_thermostat;
+          if (!t || !hass.states[t]) return 'none';
+          return variables.var_is_night ? '1px solid rgba(255,0,0,0.35)' : '1px solid rgba(255,255,255,0.18)'; ]]]
+      - opacity: "[[[ return variables.var_is_night ? '35%' : '100%'; ]]]"
+      - text-shadow: 0 1px 3px rgba(0,0,0,.70), 0 0 14px rgba(0,0,0,.35)
+      - filter: drop-shadow(0 1px 3px rgba(0,0,0,.70))
+    time:
+      - display: grid
+      - justify-self: center
+      - align-self: center
+      - z-index: "1"
+      - font-family: "'IBM Plex Mono', 'Courier New', monospace"
+      - font-size: >-
+          [[[ return (window.viewAssistResponsive && window.viewAssistResponsive.orientation === "portrait") ? "25vh" : "55vh"; ]]]
+      - font-weight: "600"
+      - letter-spacing: -0.03em
+      - line-height: "1"
+      - font-variant-numeric: tabular-nums
+      - opacity: "[[[ return variables.var_is_night ? '35%' : '100%'; ]]]"
+      - color: "[[[ return variables.var_is_night ? 'red' : '#e2e4e6'; ]]]"
+      - text-shadow: 0 1px 3px rgba(0,0,0,.70), 0 0 14px rgba(0,0,0,.35)
+      - padding-top: "0"
+      - margin-top: "0"
+    date:
+      - display: grid
+      - justify-self: center
+      - align-self: center
+      - z-index: "1"
+      - font-family: "'IBM Plex Sans', 'Helvetica Neue', sans-serif"
+      - font-size: >-
+          [[[ return (window.viewAssistResponsive && window.viewAssistResponsive.orientation === "portrait") ? "5.5vh" : "9vh"; ]]]
+      - font-weight: "400"
+      - letter-spacing: 0.10em
+      - text-transform: uppercase
+      - width: max-content
+      - color: "[[[ return variables.var_is_night ? 'red' : '#9199a6'; ]]]"
+      - text-shadow: 0 1px 3px rgba(0,0,0,.70), 0 0 14px rgba(0,0,0,.35)
+      - margin-top: clamp(2px, 0.8vh, 12px)
+      - opacity: "[[[ return variables.var_is_night ? '35%' : '100%'; ]]]"
+    night:
+      - position: absolute
+      - top: "0"
+      - min-height: 100%
+      - width: 100%
+      - overflow: hidden
+      - display: "[[[ return variables.var_is_night ? 'block' : 'none'; ]]]"
+      - z-index: "2"
+    shader:
+      - position: absolute
+      - top: "0"
+      - height: 100%
+      - width: 100%
+      - background: linear-gradient(180deg, rgba(8,9,9,0.275) 0%, rgba(8,9,9,0.30) 45%, rgba(8,9,9,0.40) 100%)
+custom_fields:
+  # Animated weather sky when chosen in the integration options; otherwise
+  # any View Assist background that points at an .htm/.html page is shown
+  # as a live iframe (plain images keep using the card background above).
+  bgframe: >-
+    [[[ try {
+      var src = '';
+      if (variables.var_rundown_background === 'sky') {
+        src = variables.var_rundown_sky_url;
+      } else {
+        var b = variables.var_background || '';
+        if (b.indexOf('.htm') !== -1) src = (b.charAt(0) === '/' || b.indexOf('http') === 0) ? b : '/' + b;
+      }
+      if (!src) return '';
+      return `<iframe src="${src}" scrolling="no" style="border:0;width:100%;height:100%;display:block;pointer-events:none"></iframe>`;
+    } catch (e) { return ''; } ]]]
+  title:
+    card:
+      type: custom:button-card
+      name: "[[[ return variables.var_weather_temperature ]]]"
+      template: null
+      tap_action:
+        action: call-service
+        service: view_assist.navigate
+        service_data:
+          device: "[[[ return variables.var_assistsat_entity ]]]"
+          path: "[[[ return `${variables.var_dashboard}/weather` ]]]"
+      styles:
+        card:
+          - background-color: transparent
+          - border-width: 0px
+          - width: 100%
+          - top: "-5%"
+          - left: 5%
+        grid:
+          - grid-template-areas: '"wx n"'
+          - align-items: center
+          - gap: clamp(4px, 0.8vw, 14px)
+        name:
+          - font-family: "'IBM Plex Sans', 'Helvetica Neue', sans-serif"
+          - font-size: >-
+              [[[ return (window.viewAssistResponsive && window.viewAssistResponsive.orientation === "portrait") ? "6vh" : "9vh"; ]]]
+          - font-weight: "600"
+          - letter-spacing: 0.02em
+          - color: "[[[ return variables.var_is_night ? 'red' : '#e2e4e6'; ]]]"
+          - text-shadow: 0 1px 3px rgba(0,0,0,.70), 0 0 14px rgba(0,0,0,.35)
+        custom_fields:
+          wx:
+            - display: grid
+            - align-self: center
+            - justify-self: center
+            - line-height: "1"
+            - font-size: >-
+                [[[ return (window.viewAssistResponsive && window.viewAssistResponsive.orientation === "portrait") ? "6vh" : "8vh"; ]]]
+            - color: "[[[ return variables.var_is_night ? 'red' : '#9199a6'; ]]]"
+            - filter: drop-shadow(0 1px 3px rgba(0,0,0,.70))
+      custom_fields:
+        wx: >-
+          [[[ var e = hass.states[variables.var_rundown_weather_entity];
+          var s = hass.states['sun.sun'];
+          var c = e ? e.state : 'sunny';
+          var n = s ? (s.state === 'below_horizon') : false;
+          return `<rundown-wx-icon condition="${c}" night="${n}"></rundown-wx-icon>`; ]]]
+  thermo: >-
+    [[[ var t = hass.states[variables.var_rundown_thermostat];
+    if (!t) return '';
+    var temp = t.attributes.current_temperature;
+    if (temp == null) return '';
+    var nm = variables.var_is_night;
+    var a = t.attributes.hvac_action || '';
+    var L = {heating:'Heating', cooling:'Cooling', idle:'Idle', off:'Off', fan:'Fan', drying:'Drying'};
+    var lab = L[a] || '';
+    var clr = nm ? 'red' : (a === 'heating' ? '#f87171' : (a === 'cooling' ? '#60a5fa' : '#9ca3af'));
+    var lclr = nm ? 'red' : '#7d848d';
+    var ic = `<svg viewBox='0 0 24 24' style='width:1.1em;height:1.1em;fill:none;stroke:none;overflow:visible;display:block'><path stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M14 14.76V3.5a2 2 0 0 0-4 0v11.26a4.5 4.5 0 1 0 4 0z'/></svg>`;
+    var lh = lab ? `<span style='font-family:IBM Plex Sans,Helvetica Neue,sans-serif;font-size:0.5em;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:${lclr};margin-left:0.2em'>${lab}</span>` : ``;
+    return `<div style='display:flex;align-items:center;gap:0.3em;color:${clr}'>${ic}<span style='font-family:IBM Plex Mono,Courier New,monospace;font-weight:600'>${Math.round(temp)}°</span>${lh}</div>`; ]]]
+  time: "[[[ return variables.var_rundown_time ]]]"
+  date: "[[[ return variables.var_rundown_date ]]]"
+  night: ""
+  shader: ""
