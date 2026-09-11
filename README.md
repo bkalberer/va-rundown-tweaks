@@ -9,7 +9,7 @@ tweaks are included and available.
 ## Disclaimers
 
 - The majority of this code has been LLM authored or LLM augmented, chiefly with Claude Sonnet 4.6 and Opus 5.
-- The current state of this project should be considered ALPHA - please take caution if/when using this integration on a production Home Assistant instance.
+- The current state of this project should be considered ALPHA - please take caution if/when using this integration on a production Home Assistant instance. Please **backup** before installing!
 - Pull requests and issues are welcome!
 - A lot of this integration's components were tailored to and built for products/services/configurations that I use in my setup. I'm working to make this more and more modular to support more customization.
 
