@@ -101,8 +101,10 @@ from .const import (
     WIDGETS,
     WX_SLIDES,
 )
+from .http import list_photos, resolve_photo_folder
 from .rundown_config import (
     is_http_url,
+    legacy_from_options,
     merged_options,
     normalize_url,
     options_from_legacy,
@@ -111,6 +113,7 @@ from .rundown_config import (
 )
 
 LEGACY_DEFAULT_PATH = "www/rundown/rundown-config.json"
+EXPORT_DEFAULT_PATH = "rundown-config-export.json"
 WIDGET_LABELS = {
     "logo": "Logo",
     "clock": "Clock",
@@ -135,6 +138,7 @@ OPTION_MENU = [
     "alerts",
     "content",
     "view_assist",
+    "import_export",
     "save",
 ]
 
@@ -195,6 +199,20 @@ def _suggest(value: Any) -> dict[str, Any] | None:
 def _optional(key: str, opts: Mapping[str, Any]) -> vol.Optional:
     """Optional field pre-filled with the current value but clearable."""
     return vol.Optional(key, description=_suggest(opts.get(key)))
+
+
+def _resolve_config_path(config_dir: str, relative: str) -> tuple[Path | None, str | None]:
+    """Resolve a config-dir relative file path, refusing anything outside it."""
+    base = Path(config_dir).resolve()
+    path = (base / str(relative or "").strip().lstrip("/")).resolve()
+    if not path.is_relative_to(base):
+        return None, "outside_config"
+    return path, None
+
+
+def _in_www(config_dir: str, path: Path) -> bool:
+    """True for files under www/, which Home Assistant serves without a login."""
+    return path.is_relative_to((Path(config_dir).resolve() / "www"))
 
 
 def _folder_ok(config_dir: str, relative: str) -> bool:
@@ -290,6 +308,9 @@ class RundownOptionsFlow(OptionsFlow):
     def __init__(self) -> None:
         """Initialise."""
         self._options: dict[str, Any] | None = None
+        self._file_path: str = ""
+        self._imported_count: int = 0
+        self._exported_secrets: bool = False
 
     @property
     def _o(self) -> dict[str, Any]:
@@ -717,6 +738,111 @@ class RundownOptionsFlow(OptionsFlow):
 
         return await self._async_form(
             "content_small_screen", schema, user_input, apply, validate, back=self.async_step_content
+        )
+
+    # ── Import / export ────────────────────────────────────────────────
+    async def async_step_import_export(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Import from, or export to, a standalone rundown-config.json."""
+        return self.async_show_menu(
+            step_id="import_export", menu_options=["import_settings", "export_settings", "init"]
+        )
+
+    async def async_step_import_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Merge a rundown-config.json into the settings being edited."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            path, error = _resolve_config_path(self.hass.config.config_dir, user_input["path"])
+
+            def _read() -> dict[str, Any] | str:
+                if not path.is_file():
+                    return "file_not_found"
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    return "invalid_json"
+                return data if isinstance(data, dict) else "invalid_json"
+
+            result = error or await self.hass.async_add_executor_job(_read)
+            if isinstance(result, str):
+                errors["path"] = result
+            else:
+                base = Path(self.hass.config.config_dir).resolve()
+                imported = options_from_legacy(result, str(path.parent.relative_to(base).as_posix()))
+                self._o.update(imported)
+                self._file_path = str(path.relative_to(base).as_posix())
+                self._imported_count = len(imported)
+                return await self.async_step_import_done()
+
+        schema = vol.Schema({vol.Required("path", default=LEGACY_DEFAULT_PATH): _text()})
+        return self.async_show_form(step_id="import_settings", data_schema=schema, errors=errors)
+
+    async def async_step_import_done(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Confirm what was imported; nothing is stored until Save."""
+        if user_input is not None:
+            return await self.async_step_init()
+        return self.async_show_form(
+            step_id="import_done",
+            data_schema=vol.Schema({}),
+            description_placeholders={"path": self._file_path, "count": str(self._imported_count)},
+        )
+
+    async def async_step_export_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Write the settings being edited to a rundown-config.json."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            config_dir = self.hass.config.config_dir
+            path, error = _resolve_config_path(config_dir, user_input["path"])
+            include_secrets = user_input["include_secrets"]
+            if error:
+                errors["path"] = error
+            elif include_secrets and _in_www(config_dir, path):
+                # Anything under www/ can be downloaded without signing in.
+                errors["path"] = "secrets_in_www"
+            else:
+
+                def _write() -> str | None:
+                    folder = resolve_photo_folder(self.hass, self._o.get(CONF_BG_FOLDER))
+                    data = legacy_from_options(
+                        self._o, photo_names=list_photos(folder), include_secrets=include_secrets
+                    )
+                    try:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                    except OSError:
+                        return "write_failed"
+                    return None
+
+                if write_error := await self.hass.async_add_executor_job(_write):
+                    errors["path"] = write_error
+                else:
+                    base = Path(config_dir).resolve()
+                    self._file_path = str(path.relative_to(base).as_posix())
+                    self._exported_secrets = include_secrets
+                    return await self.async_step_export_done()
+
+        schema = vol.Schema(
+            {
+                vol.Required("path", default=EXPORT_DEFAULT_PATH): _text(),
+                vol.Required("include_secrets", default=True): sel.BooleanSelector(),
+            }
+        )
+        return self.async_show_form(
+            step_id="export_settings",
+            data_schema=self.add_suggested_values_to_schema(schema, user_input or {}),
+            errors=errors,
+        )
+
+    async def async_step_export_done(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Confirm where the file was written."""
+        if user_input is not None:
+            return await self.async_step_init()
+        return self.async_show_form(
+            step_id="export_done",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "path": self._file_path,
+                "secrets": "included" if self._exported_secrets else "left out",
+            },
         )
 
     # ── View Assist & panel ────────────────────────────────────────────

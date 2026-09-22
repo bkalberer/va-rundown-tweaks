@@ -81,6 +81,7 @@ from .const import (
     DEFAULT_MOBILE_DURATIONS,
     DEFAULT_WX_SLIDE_TIMES,
     DEFAULTS,
+    DOMAIN,
     FRONTEND_VERSION,
     MOBILE_MODULES,
     PHOTO_URL,
@@ -385,6 +386,97 @@ def options_from_page_layout(payload: Mapping[str, Any]) -> dict[str, Any]:
             s["id"]: max(1, int(s.get("time") or 1)) for s in slides if s.get("id") in WX_SLIDES
         }
     return out
+
+
+# Keys in a legacy rundown-config.json that carry credentials.
+LEGACY_SECRET_KEYS = (
+    "weatherKey",
+    "wmataKey",
+    "icsUrl",
+    "outlookToken",
+    "esvKey",
+    "lfmKey",
+    "todoClientSecret",
+    "todoRefreshToken",
+)
+
+
+def _legacy_local_path(folder: str) -> str:
+    """Turn a config-dir relative photo folder back into a page-usable path."""
+    folder = str(folder or "").strip().strip("/")
+    if folder.startswith("www/"):
+        return "/local/" + folder[len("www/") :]
+    return ""
+
+
+def legacy_from_options(
+    options: Mapping[str, Any],
+    *,
+    photo_names: Iterable[str] = (),
+    include_secrets: bool = True,
+) -> dict[str, Any]:
+    """Build a standalone rundown-config.json from the integration options.
+
+    The inverse of options_from_legacy(). Integration-only settings (View
+    Assist views, the sidebar panel, the weather source, the server-side
+    fetch) have no legacy equivalent and are left out; so is haToken, which
+    the integration never stores.
+    """
+    o = merged_options(options)
+    data: dict[str, Any] = {
+        "_exported_by": f"{DOMAIN} {FRONTEND_VERSION}",
+        "bgImages": split_lines(o[CONF_BG_IMAGES]) or list(photo_names),
+        "bgLocalPath": _legacy_local_path(o[CONF_BG_FOLDER]),
+        "bgInterval": int(o[CONF_BG_INTERVAL]),
+        "wxRotationEnabled": bool(o[CONF_WX_ROTATION]),
+        "wxSlides": wx_slides(o),
+        "wxIntelliStar": bool(o[CONF_WX_BROADCAST_STYLE]),
+        "wxCityName": o[CONF_WX_CITY_NAME],
+        "weatherKey": o[CONF_WEATHER_KEY],
+        "lat": float(o[CONF_LATITUDE]) if o.get(CONF_LATITUDE) is not None else None,
+        "lon": float(o[CONF_LONGITUDE]) if o.get(CONF_LONGITUDE) is not None else None,
+        "tickerPrimarySource": o[CONF_TICKER_SOURCE] if o[CONF_TICKER_SOURCE] in ("wtop", "san") else "wtop",
+        "tickerSpeed": float(o[CONF_TICKER_SPEED]),
+        "tickerHeight": o[CONF_TICKER_HEIGHT],
+        "wmataKey": o[CONF_WMATA_KEY],
+        "stations": split_csv(o[CONF_WMATA_STATIONS]),
+        "icsUrl": normalize_url(o[CONF_ICS_URL]),
+        "outlookUrl": o[CONF_GRAPH_URL],
+        "outlookToken": o[CONF_GRAPH_TOKEN],
+        "esvKey": o[CONF_ESV_KEY],
+        "lfmKey": o[CONF_LASTFM_KEY],
+        "lfmUser": o[CONF_LASTFM_USER],
+        "todoClientId": o[CONF_MS_CLIENT_ID],
+        "todoClientSecret": o[CONF_MS_CLIENT_SECRET],
+        "todoRefreshToken": o[CONF_MS_REFRESH_TOKEN],
+        "todoListName": o[CONF_MS_LIST_NAME],
+        "todoistListName": o[CONF_TODO_FILTER],
+        "todoOverdueDays": int(o[CONF_TODO_OVERDUE_DAYS]),
+        "todoFutureDays": int(o[CONF_TODO_FUTURE_DAYS]),
+        "todoShowUndated": bool(o[CONF_TODO_SHOW_UNDATED]),
+        "haFrontDoorEntity": o[CONF_DOOR_ENTITY],
+        "haFrontDoorOperatorEntity": o[CONF_DOOR_OPERATOR_ENTITY],
+        "haBroadcastEntity": o[CONF_BROADCAST_ENTITY],
+        "haThermostatEntity": o[CONF_THERMOSTAT_ENTITY],
+        "textScale": float(o[CONF_TEXT_SCALE]),
+        "textShadowEnabled": bool(o[CONF_TEXT_SHADOW]),
+        "gridCols": int(o[CONF_GRID_COLS]),
+        "gridRows": int(o[CONF_GRID_ROWS]),
+        "gridGap": str(o[CONF_GRID_GAP]),
+        "gridPad": str(o[CONF_GRID_PAD]),
+        "hiddenWidgets": _ordered_known(o[CONF_HIDDEN_WIDGETS], WIDGETS),
+        "layout": sanitize_layout(o[CONF_LAYOUT]),
+        "mobileModules": [m for m in o[CONF_MOBILE_ORDER] if m in set(o[CONF_MOBILE_MODULES] or [])],
+        "mobileDurations": {
+            key: int(value)
+            for key, value in (o[CONF_MOBILE_DURATIONS] or {}).items()
+            if key in MOBILE_MODULES
+        },
+    }
+    if not include_secrets:
+        for key in LEGACY_SECRET_KEYS:
+            data[key] = ""
+    return {key: value for key, value in data.items() if value is not None}
 
 
 def _legacy_folder(local_path: str, legacy_base: str) -> str:
