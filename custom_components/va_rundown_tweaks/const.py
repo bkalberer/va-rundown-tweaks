@@ -10,7 +10,7 @@ VA_DOMAIN: Final = "view_assist"
 
 # Bump whenever anything under www/ changes so Lovelace resources and the
 # panel iframe URL are cache-busted.
-FRONTEND_VERSION: Final = "0.2.0"
+FRONTEND_VERSION: Final = "0.3.0"
 
 STATIC_URL: Final = f"/{DOMAIN}/static"
 PHOTO_URL: Final = f"/api/{DOMAIN}/photo"
