@@ -188,7 +188,7 @@ custom_fields:
           var s = hass.states['sun.sun'];
           var c = e ? e.state : 'sunny';
           var n = s ? (s.state === 'below_horizon') : false;
-          return `<rundown-wx-icon condition="${c}" night="${n}"></rundown-wx-icon>`; ]]]
+          return `<rundown-tweaks-wx-icon condition="${c}" night="${n}"></rundown-tweaks-wx-icon>`; ]]]
   thermo: >-
     [[[ var t = hass.states[variables.var_rundown_thermostat];
     if (!t) return '';
