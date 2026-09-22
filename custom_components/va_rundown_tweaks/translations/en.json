@@ -53,7 +53,12 @@
       "ms_client_id_required": "Microsoft To Do needs an Azure app Client ID.",
       "view_assist_missing": "View Assist is not installed, so its views and sidebar cannot be added.",
       "widget_outside_grid": "{widget} runs past the edge of the grid. Reduce its width or height, move it, or add grid columns or rows.",
-      "no_slides": "Turn on at least one small screen section."
+      "no_slides": "Turn on at least one small screen section.",
+      "file_not_found": "No file at that path.",
+      "invalid_json": "That file is not a valid Rundown config (JSON object expected).",
+      "outside_config": "The path must be inside your Home Assistant config folder.",
+      "secrets_in_www": "Files under www/ can be downloaded by anyone without signing in. Choose a path outside www/, or turn off including API keys.",
+      "write_failed": "Could not write that file. Check the path and permissions."
     },
     "step": {
       "init": {
@@ -72,6 +77,7 @@
           "alerts": "Home Assistant alerts",
           "content": "Content",
           "view_assist": "View Assist & sidebar panel",
+          "import_export": "Import / export",
           "save": "Save"
         }
       },
@@ -464,6 +470,42 @@
             }
           }
         }
+      },
+      "import_export": {
+        "title": "Import / export",
+        "description": "Move settings between this integration and a standalone rundown.html setup. Importing changes the settings in this dialog only, so choose **Save** afterwards to apply them.",
+        "menu_options": {
+          "import_settings": "Import from a config file",
+          "export_settings": "Export to a config file",
+          "init": "Back to settings"
+        }
+      },
+      "import_settings": {
+        "title": "Import settings",
+        "description": "Path to a rundown-config.json, relative to your Home Assistant config folder. Its settings are merged into the ones in this dialog: anything the file sets wins, anything it leaves out keeps its current value. Settings that only exist here (View Assist views, the sidebar panel, the weather source, small screen sections) are untouched, and a Home Assistant token in the file is ignored.",
+        "data": {
+          "path": "Config file path"
+        }
+      },
+      "import_done": {
+        "title": "Imported",
+        "description": "Imported {count} settings from `{path}`.\n\nNothing has been stored yet: look through the sections, then choose **Save** on the main menu to apply them, or close this dialog to discard them."
+      },
+      "export_settings": {
+        "title": "Export settings",
+        "description": "Writes the settings currently in this dialog to a rundown-config.json that a standalone rundown.html can read. Settings that only exist in this integration are left out, and no Home Assistant token is written (a standalone page needs its own).",
+        "data": {
+          "path": "Save to",
+          "include_secrets": "Include API keys and tokens"
+        },
+        "data_description": {
+          "path": "Relative to your Home Assistant config folder; folders are created as needed and an existing file is overwritten.",
+          "include_secrets": "Needed for the exported file to work on its own. The file must then be kept out of www/, which anyone can download without signing in."
+        }
+      },
+      "export_done": {
+        "title": "Exported",
+        "description": "Wrote `{path}` with API keys {secrets}.\n\nTo use it with a standalone rundown.html, put it next to that page and check its background photo path."
       }
     }
   },
